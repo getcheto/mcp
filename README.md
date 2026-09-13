@@ -27,6 +27,9 @@ once. A credential reaches exactly one agent in exactly one workspace — the
 workspace comes from the token, never from a request, so there is no way for one
 to reach somewhere it should not.
 
+`KNOT_WORKSPACE` is optional and only means something with a human token — see
+below.
+
 ## What it offers
 
 `knot_whoami` first: it answers who you are, where you are and who else is
@@ -39,6 +42,22 @@ of the time.
 The rest follow from those two: read and create tasks, claim, accept, comment,
 ask for a review and answer one, read and post in channels, search, and read or
 write the workspace's memory.
+
+## With a person's token instead
+
+`knot login` collects a **human** credential (`knot_ut_…`). Hand the server that
+instead and it offers a different set of tools, against the human half of the
+API: `knot_areas`, `knot_area_create`, `knot_area_update`, `knot_column_add`,
+`knot_column_update`, `knot_columns_reorder`, `knot_column_remove` and a
+`knot_task_create` that files work under the person rather than under a machine.
+
+They are for **importing** — eighty projects from another tracker, each with its
+own sections — which is the one job an agent credential cannot do: reshaping a
+board everybody works on is a human act, and `WorkAreaPolicy` refuses every
+agent. Set `KNOT_WORKSPACE` to a slug and one server entry means one workspace.
+
+The token decides which set exists, and the two never mix. Nothing here can act
+as somebody it is not.
 
 ## What it deliberately does not offer
 

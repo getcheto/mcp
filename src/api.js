@@ -18,9 +18,24 @@ export class KnotError extends Error {
 }
 
 export class Knot {
-    constructor({ url, token }) {
-        this.base = String(url).replace(/\/+$/, '') + '/api/v1/agent';
+    /**
+     * Which half of the API this credential belongs to, from the credential.
+     *
+     * `knot_ak_…` is an agent: one workspace, fixed by the token, and no say in
+     * how the room is arranged. `knot_ut_…` is a person from a terminal: several
+     * workspaces, which is why those tools ask which one, and the authority to
+     * create a board — which an agent credential does not have and is not going
+     * to be given. Two surfaces, two tool sets, and the token decides.
+     */
+    constructor({ url, token, workspace = null }) {
+        this.surface = String(token ?? '').startsWith('knot_ut_') ? 'cli' : 'agent';
+        this.base = String(url).replace(/\/+$/, '') + `/api/v1/${this.surface}`;
         this.token = token;
+
+        // A default for `workspace`, so an MCP entry pointed at one workspace
+        // does not make the model repeat its name in every call. One server per
+        // workspace is a reasonable way to run this.
+        this.workspace = workspace;
     }
 
     async call(path, { method = 'GET', body = null, idempotencyKey = null, timeoutMs = TIMEOUT_MS } = {}) {
@@ -66,7 +81,7 @@ export class Knot {
             return payload;
         }
 
-        throw new KnotError(explain(response.status, payload), response.status);
+        throw new KnotError(explain(response.status, payload, this.surface), response.status);
     }
 }
 
@@ -85,19 +100,25 @@ function safeParse(text) {
  * "an agent may never close a task; move it to review and ask somebody" stops
  * and does the right thing, so the rule is stated where the refusal happens.
  */
-function explain(status, payload) {
+function explain(status, payload, surface = 'agent') {
     const said = payload?.message ?? '';
 
     if (status === 401) {
-        return 'The credential is unknown, revoked or expired. Issue a new token in the panel under Agents.';
+        return surface === 'cli'
+            ? 'The credential is unknown, revoked or expired. Run `knot login` again.'
+            : 'The credential is unknown, revoked or expired. Issue a new token in the panel under Agents.';
     }
 
     if (status === 403) {
-        return `${said || 'Refused.'} Two rules cause most of these: an agent may never set a task to done — move it to review and ask somebody — and an agent may only act on work it created or holds.`;
+        return surface === 'cli'
+            ? `${said || 'Refused.'} A terminal credential reaches the workspaces you are a member of, and only what \`knot login\` granted it — one minted before a scope existed does not have that scope, and running \`knot login\` again is how it gets one.`
+            : `${said || 'Refused.'} Two rules cause most of these: an agent may never set a task to done — move it to review and ask somebody — and an agent may only act on work it created or holds.`;
     }
 
     if (status === 404) {
-        return 'No such thing in this workspace. A credential reaches exactly one workspace, and anything outside it looks like it does not exist.';
+        return surface === 'cli'
+            ? 'No such thing you can reach. A terminal credential sees the workspaces you belong to, and a board is named by uuid or id here — never by slug, which would be ambiguous across two of them.'
+            : 'No such thing in this workspace. A credential reaches exactly one workspace, and anything outside it looks like it does not exist.';
     }
 
     if (status === 422) {

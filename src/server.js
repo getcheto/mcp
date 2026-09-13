@@ -6,29 +6,50 @@
  * and every package in it is a package they have to trust and update. The
  * protocol surface an stdio server needs is three methods.
  *
- * Two settings, both from the environment, because an MCP client launches this
- * with a command and an env block and has nowhere else to put them:
+ * Settings come from the environment, because an MCP client launches this with a
+ * command and an env block and has nowhere else to put them:
  *
- *   KNOT_URL     where Knot is
- *   KNOT_TOKEN   the agent credential, from the panel under Agents
+ *   KNOT_URL        where Knot is
+ *   KNOT_TOKEN      the credential — `knot_ak_…` for an agent, `knot_ut_…` for a
+ *                   person from `knot login`
+ *   KNOT_AGENT      which connected agent to act as, when the bridge armed several
+ *   KNOT_WORKSPACE  with a human credential, the workspace to act in by default,
+ *                   so one MCP entry per workspace needs no argument repeated
+ *
+ * **The token decides which tools exist.** An agent credential gets the work
+ * tools; a human one gets the tools that shape the boards, which an agent
+ * credential may not have and is not going to be given. Two sets, never mixed,
+ * and nothing here can act as somebody it is not.
+ *
+ * All three are optional together: on a machine that has run `knot connect`,
+ * leaving them unset reads the credential the bridge already put in the OS
+ * keychain, so no token has to be pasted into a config file. See credentials.js.
  *
  * The token is never logged. Errors go to stderr, which the client shows and
  * the model does not read.
  */
 import { Knot, KnotError } from './api.js';
+import { resolveCredential } from './credentials.js';
+import { HUMAN_TOOLS } from './human-tools.js';
 import { TOOLS } from './tools.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 
 export async function serve({ input = process.stdin, output = process.stdout, env = process.env } = {}) {
-    const url = env.KNOT_URL;
-    const token = env.KNOT_TOKEN;
+    const credential = await resolveCredential(env);
+    const { url, token } = credential;
 
-    if (!url || !token) {
-        throw new Error('KNOT_URL and KNOT_TOKEN are both required. The token comes from the panel: Agents → the agent → Issue token.');
-    }
+    const knot = new Knot({ url, token, workspace: env.KNOT_WORKSPACE ?? null });
+    const tools = knot.surface === 'cli' ? HUMAN_TOOLS : TOOLS;
 
-    const knot = new Knot({ url, token });
+    // Where the credential came from, who it is and which half of the API it
+    // reaches — never what it is. A person debugging "why is it commenting as
+    // Rocky", or "why is there no knot_inbox", needs this line; a screen
+    // recording must not capture a bearer token.
+    process.stderr.write(
+        `knot-mcp: ${url}${credential.handle ? ` as @${credential.handle}` : ''} (${knot.surface === 'cli' ? 'human credential' : 'agent credential'} from ${credential.source})\n`,
+    );
+
     const write = (message) => output.write(JSON.stringify(message) + '\n');
 
     for await (const line of lines(input)) {
@@ -45,7 +66,7 @@ export async function serve({ input = process.stdin, output = process.stdout, en
             continue;
         }
 
-        const answer = await handle(knot, request);
+        const answer = await handle(knot, tools, request);
 
         // A notification has no id and expects no reply. Answering one is a
         // protocol error, not a harmless extra.
@@ -55,7 +76,7 @@ export async function serve({ input = process.stdin, output = process.stdout, en
     }
 }
 
-async function handle(knot, request) {
+async function handle(knot, tools, request) {
     const { method, params } = request;
 
     if (method === 'initialize') {
@@ -71,13 +92,13 @@ async function handle(knot, request) {
     if (method === 'tools/list') {
         return {
             result: {
-                tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
+                tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
             },
         };
     }
 
     if (method === 'tools/call') {
-        const tool = TOOLS.find((candidate) => candidate.name === params?.name);
+        const tool = tools.find((candidate) => candidate.name === params?.name);
 
         if (!tool) {
             return { error: { code: -32602, message: `No tool called ${params?.name}.` } };
