@@ -12,14 +12,27 @@
  * `knot login`) and are here, separate. The server picks the set from the token,
  * because a token is the one thing that cannot be argued with.
  *
- * The job they exist for is **importing**. Eighty projects from another tracker,
- * each with its own sections, is eighty boards and four hundred columns — a day
- * of clicking in the panel, or a loop from here.
+ * What they cover is the administrative half of Knot: the boards and their
+ * columns, and the agents — creating one, giving it a place to work, saying what
+ * it is for and which board its work lands on, arming a machine for it and
+ * disarming one. Everything a person does in the panel to set the place up, as
+ * against the work that then happens in it.
  *
- * Two things are deliberately absent. **There is no tool to act as an agent**:
- * one credential is one identity, and a person's token writing under an agent's
- * name would make every author line a guess. And **nothing here touches an
- * account** — no invites, no roles, no deletions; the panel keeps those.
+ * The job that made it worth building is **importing**: eighty projects from
+ * another tracker, each with its own sections, is eighty boards and four hundred
+ * columns — a day of clicking in the panel, or a loop from here. Setting up a
+ * fleet of agents has the same shape.
+ *
+ * Two things are deliberately absent, and they are the same two the panel is
+ * careful about. **There is no tool to act as an agent**: one credential is one
+ * identity, and a person's token writing under an agent's name would make every
+ * author line a guess. And **nothing here touches an account** — no passwords,
+ * no roles, no invitations, no deletions.
+ *
+ * What a credential may do beyond that is not decided here at all. It is the
+ * person's own authority, checked by the same policies the panel uses: an agent
+ * is administered by whoever owns it, and a token belonging to somebody who owns
+ * none of them can list boards and file work and nothing else.
  */
 export const HUMAN_TOOLS = [
     {
@@ -189,6 +202,120 @@ export const HUMAN_TOOLS = [
         },
         run: (knot, { area, column, into }) =>
             knot.call(`/areas/${encodeURIComponent(area)}/columns/${column}`, { method: 'DELETE', body: { into } }),
+    },
+    {
+        name: 'knot_agents',
+        description:
+            'The agents you own: what each one is called in each workspace, its charter, its board, and which machines are armed for it. The administrative view — somebody else\'s agent is not yours to administer and is not here.',
+        inputSchema: { type: 'object', properties: {} },
+        run: (knot) => knot.call('/agents'),
+    },
+    {
+        name: 'knot_agent_create',
+        description:
+            'Create an agent and, with `workspace`, give it a place to work in one call. The handle is what people type to mention it there and is derived from the name when you leave it out; the charter is its job **in that workspace**, because the same agent does something else in another.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                name: { type: 'string' },
+                description: { type: 'string', description: "What it is, everywhere. Not its job here — that is the charter." },
+                workspace: { type: 'string', description: 'Workspace slug or uuid. Without it the agent exists and works nowhere.' },
+                handle: { type: 'string', description: 'What it answers to there, without the @.' },
+                charter: { type: 'string', description: 'Its job in that workspace, in words. Worth writing: it is what the runtime is told it is for.' },
+            },
+            required: ['name'],
+        },
+        run: (knot, { workspace, ...rest }) =>
+            knot.call('/agents', {
+                method: 'POST',
+                body: { ...rest, ...(isBlank(workspace) ? {} : { workspace: workspaceFor(knot, workspace) }) },
+                idempotencyKey: `mcp-agent-${slug(String(rest.name ?? ''))}`,
+            }),
+    },
+    {
+        name: 'knot_agent_update',
+        description:
+            'Change an agent. `name` and `description` follow it into every workspace; `handle`, `charter` and `area` belong to the one you name and change nothing elsewhere. `area` is the board its work lands on when it does not say — a default, not a fence — and `area: "none"` clears it.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                agent: { type: 'number', description: 'Agent id, from knot_agents.' },
+                name: { type: 'string' },
+                description: { type: 'string' },
+                workspace: { type: 'string', description: 'Required to change handle, charter or area: they belong to one workspace.' },
+                handle: { type: 'string' },
+                charter: { type: 'string' },
+                area: { type: 'string', description: 'Board uuid or id, or "none" to clear it. knot_areas lists them.' },
+            },
+            required: ['agent'],
+        },
+        run: (knot, { agent, workspace, area, ...rest }) => {
+            const body = { ...rest };
+
+            if (!isBlank(workspace)) {
+                body.workspace = workspaceFor(knot, workspace);
+            }
+
+            // Present-and-null is how "no board of its own" is said, so "none"
+            // has to survive as a value rather than be dropped as empty.
+            if (area !== undefined) {
+                body.area = ['none', 'null', ''].includes(String(area).trim().toLowerCase()) ? null : String(area).trim();
+            }
+
+            return knot.call(`/agents/${agent}`, { method: 'PATCH', body });
+        },
+    },
+    {
+        name: 'knot_agent_join',
+        description: 'Put an agent you own into another workspace. It keeps its identity and gets a handle and a charter there — the same agent is @qa on one project and @kalel on another.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                agent: { type: 'number' },
+                workspace: { type: 'string' },
+                handle: { type: 'string' },
+                charter: { type: 'string' },
+            },
+            required: ['agent', 'workspace'],
+        },
+        run: (knot, { agent, workspace, ...rest }) =>
+            knot.call(`/agents/${agent}/memberships`, { method: 'POST', body: { workspace: workspaceFor(knot, workspace), ...rest } }),
+    },
+    {
+        name: 'knot_agent_pair',
+        description:
+            'A pairing code for a machine to redeem with `knot connect`. Single-use, fifteen minutes, and the **better** way to arm a runtime that has a terminal: what you hand over is worthless the moment the machine has connected. Use knot_agent_token instead only where no terminal exists.',
+        inputSchema: {
+            type: 'object',
+            properties: { membership: { type: 'number', description: 'Membership id, from knot_agents.' } },
+            required: ['membership'],
+        },
+        run: (knot, { membership }) => knot.call(`/memberships/${membership}/pair`, { method: 'POST' }),
+    },
+    {
+        name: 'knot_agent_token',
+        description:
+            'A credential for a machine with nowhere to type `knot connect` — a container, a cron line, another MCP entry that takes a token in an env block. **Shown once and never again**, so whatever is going to hold it should be ready. Prefer knot_agent_pair where there is a terminal.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                membership: { type: 'number', description: 'Membership id, from knot_agents.' },
+                name: { type: 'string', description: 'What this credential is for, so it can be recognised later and revoked.' },
+                expires_in_days: { type: 'number' },
+            },
+            required: ['membership', 'name'],
+        },
+        run: (knot, { membership, ...rest }) => knot.call(`/memberships/${membership}/credentials`, { method: 'POST', body: rest }),
+    },
+    {
+        name: 'knot_agent_disconnect',
+        description: 'Disarm one machine. The agent and its other machines keep working; the credential that machine holds stops on its next request.',
+        inputSchema: {
+            type: 'object',
+            properties: { connection: { type: 'number', description: 'Connection id, from knot_agents.' } },
+            required: ['connection'],
+        },
+        run: (knot, { connection }) => knot.call(`/connections/${connection}`, { method: 'DELETE' }),
     },
     {
         name: 'knot_task_create',

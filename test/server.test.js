@@ -424,6 +424,75 @@ describe('the credential decides the surface', () => {
         assert.match(answers[0].result.content[0].text, /KNOT_WORKSPACE/);
     });
 
+    it('administers agents without ever being able to speak as one', async () => {
+        const names = (await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }], { env: human }))[0].result.tools.map(
+            (tool) => tool.name,
+        );
+
+        // Everything `knot agent …` does from a terminal, as tools.
+        for (const tool of ['knot_agents', 'knot_agent_create', 'knot_agent_update', 'knot_agent_join', 'knot_agent_pair', 'knot_agent_token', 'knot_agent_disconnect']) {
+            assert.ok(names.includes(tool), `expected ${tool}`);
+        }
+
+        // And nothing that writes under an agent's name, or touches an account.
+        assert.ok(!names.some((name) => /as_agent|impersonat|password|invite|role/.test(name)));
+    });
+
+    it('mints an agent credential against the membership, not the agent', async () => {
+        const sent = [];
+
+        await exchange(
+            [
+                {
+                    jsonrpc: '2.0',
+                    id: 1,
+                    method: 'tools/call',
+                    params: { name: 'knot_agent_token', arguments: { membership: 6, name: 'mcp' } },
+                },
+            ],
+            {
+                env: human,
+                fetchImpl: async (url, options) => {
+                    sent.push({ url, body: options.body ? JSON.parse(options.body) : null });
+
+                    return { ok: true, status: 201, text: async () => JSON.stringify({ token: 'knot_ak_x' }) };
+                },
+            },
+        );
+
+        // A credential is scoped to one membership — one agent in one workspace
+        // — so that is what it is asked of.
+        assert.equal(sent[0].url, 'http://knot.test/api/v1/cli/memberships/6/credentials');
+        assert.deepEqual(sent[0].body, { name: 'mcp' });
+    });
+
+    it('clears an agent\'s board on "none" rather than dropping the field', async () => {
+        const sent = [];
+
+        await exchange(
+            [
+                {
+                    jsonrpc: '2.0',
+                    id: 1,
+                    method: 'tools/call',
+                    params: { name: 'knot_agent_update', arguments: { agent: 6, workspace: 'appsi', area: 'none' } },
+                },
+            ],
+            {
+                env: human,
+                fetchImpl: async (url, options) => {
+                    sent.push({ url, body: options.body ? JSON.parse(options.body) : null });
+
+                    return { ok: true, status: 200, text: async () => JSON.stringify({ agent: {}, membership: {} }) };
+                },
+            },
+        );
+
+        // Present and null is a value — "no board of its own". An absent field
+        // would mean "leave it alone", which is the opposite instruction.
+        assert.deepEqual(sent[0].body, { workspace: 'appsi', area: null });
+    });
+
     it('reads a board back before writing to it again', async () => {
         const sent = [];
 

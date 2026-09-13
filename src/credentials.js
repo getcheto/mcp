@@ -42,10 +42,20 @@ const FALLBACK_FILE = join(homedir(), '.config', 'knot', 'credentials.json');
 export async function resolveCredential(env = process.env) {
     if (env.KNOT_TOKEN) {
         if (!env.KNOT_URL) {
-            throw new Error('KNOT_TOKEN was given without KNOT_URL. Both are needed, or neither — drop both to use the credential `knot connect` already stored on this machine.');
+            throw new Error('KNOT_TOKEN was given without KNOT_URL. Both are needed, or neither — drop both to use the credential this machine already stored.');
         }
 
         return { url: env.KNOT_URL, token: env.KNOT_TOKEN, handle: env.KNOT_AGENT ?? null, source: 'environment' };
+    }
+
+    // `KNOT_AS=user` asks for the person's credential rather than an agent's,
+    // and it is stored the same way `knot login` left it: same keychain, same
+    // service, a `#user` suffix on the URL. Asking somebody to open the panel,
+    // find the token they cannot see twice and paste it into a config file is
+    // how a credential ends up in a JSON file, in a backup, and in whatever
+    // syncs the home directory — which is the thing the keychain was for.
+    if (String(env.KNOT_AS ?? '').toLowerCase() === 'user') {
+        return userCredential(env);
     }
 
     const sessions = await connectedAgents(env.KNOT_URL ?? null);
@@ -78,6 +88,45 @@ export async function resolveCredential(env = process.env) {
     }
 
     return { ...sessions[0], source: 'keychain' };
+}
+
+/**
+ * The person's own credential, from where `knot login` put it.
+ *
+ * One URL or none: unlike an agent, a person is not scoped to a workspace, so
+ * there is nothing here to disambiguate between — only which Knot. `KNOT_URL`
+ * names it; without one, the URL the bridge last connected an agent against
+ * answers, because a machine that has one Knot on it has one Knot on it.
+ *
+ * @returns {Promise<{url: string, token: string, handle: string|null, source: string}>}
+ */
+async function userCredential(env) {
+    const url = trimSlashes(env.KNOT_URL ?? (await knownUrl()) ?? '');
+
+    if (!url) {
+        throw new Error('KNOT_AS=user needs KNOT_URL as well: nothing on this machine says which Knot to sign in to.');
+    }
+
+    const token = await readSecret(`${url}#user`);
+
+    if (!token) {
+        throw new Error(
+            `No credential of yours for ${url} on this machine. Run \`knot login --url ${url}\` once — it authorizes this terminal in your browser and stores the result in the keychain, so nothing has to be pasted anywhere.`,
+        );
+    }
+
+    return { url, token, handle: null, source: 'keychain' };
+}
+
+/** The Knot this machine already talks to, from the bridge's own notes. */
+async function knownUrl() {
+    try {
+        const file = JSON.parse(await readFile(SESSION_FILE, 'utf8'));
+
+        return Array.isArray(file.agents) && file.agents[0]?.url ? file.agents[0].url : null;
+    } catch {
+        return null;
+    }
 }
 
 /**

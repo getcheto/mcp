@@ -27,8 +27,10 @@ once. A credential reaches exactly one agent in exactly one workspace — the
 workspace comes from the token, never from a request, so there is no way for one
 to reach somewhere it should not.
 
-`KNOT_WORKSPACE` is optional and only means something with a human token — see
-below.
+On a machine that has run `knot connect`, drop both: the credential is already
+in the keychain and the server reads it. `KNOT_AGENT=<handle>` picks between
+several. `KNOT_WORKSPACE` is optional and only means something with a human
+credential — see below.
 
 ## What it offers
 
@@ -43,21 +45,54 @@ The rest follow from those two: read and create tasks, claim, accept, comment,
 ask for a review and answer one, read and post in channels, search, and read or
 write the workspace's memory.
 
-## With a person's token instead
+## As yourself, with no token to paste
 
-`knot login` collects a **human** credential (`knot_ut_…`). Hand the server that
-instead and it offers a different set of tools, against the human half of the
-API: `knot_areas`, `knot_area_create`, `knot_area_update`, `knot_column_add`,
-`knot_column_update`, `knot_columns_reorder`, `knot_column_remove` and a
-`knot_task_create` that files work under the person rather than under a machine.
+`knot login` authorizes you once, in a browser, and leaves the credential in the
+OS keychain. Point the server at that and there is nothing to copy anywhere:
 
-They are for **importing** — eighty projects from another tracker, each with its
-own sections — which is the one job an agent credential cannot do: reshaping a
-board everybody works on is a human act, and `WorkAreaPolicy` refuses every
-agent. Set `KNOT_WORKSPACE` to a slug and one server entry means one workspace.
+```json
+{
+  "mcpServers": {
+    "knot-admin": {
+      "command": "node",
+      "args": ["/absolute/path/to/knot-mcp/bin/knot-mcp.js"],
+      "env": { "KNOT_AS": "user", "KNOT_URL": "https://your-knot", "KNOT_WORKSPACE": "appsi" }
+    }
+  }
+}
+```
 
-The token decides which set exists, and the two never mix. Nothing here can act
-as somebody it is not.
+With a human credential the tools are the **administrative** half — the part a
+person does in the panel to set the place up, as against the work that then
+happens in it:
+
+| | |
+| --- | --- |
+| `knot_whoami` | who you are, what the credential was granted, which workspaces it reaches |
+| `knot_areas` · `knot_area_create` · `knot_area_update` | the boards, with their own columns |
+| `knot_column_add` · `knot_column_update` · `knot_columns_reorder` · `knot_column_remove` | and the columns on them |
+| `knot_agents` · `knot_agent_create` · `knot_agent_update` · `knot_agent_join` | the agents you own, and where each one works |
+| `knot_agent_pair` · `knot_agent_token` · `knot_agent_disconnect` | arming a machine for one, and disarming it |
+| `knot_tasks` · `knot_task_create` | reading a board back, and filing work under your own name |
+
+The job that made them worth building is **importing**: eighty projects from
+another tracker, each with its own sections, is eighty boards and four hundred
+columns. Setting up a fleet of agents has the same shape.
+
+`KNOT_WORKSPACE` sets the default workspace, so one entry per workspace is a
+reasonable way to run this — point a second at `savia` and neither model has to
+remember which room it is in.
+
+**What a credential may do is not decided here.** It is your own authority,
+checked by the same policies the panel uses: an agent is administered by
+whoever owns it, and a credential belonging to somebody who owns none can list
+boards and file work and nothing else.
+
+The token decides which set exists and the two never mix. An agent credential is
+never handed a tool that reshapes a board — `WorkAreaPolicy` refuses every agent,
+because redrawing the room everybody is standing in is a human act. And nothing
+here can act as somebody it is not: one credential is one identity, so there is
+no "run this as @magui".
 
 ## What it deliberately does not offer
 
