@@ -1,5 +1,5 @@
 /**
- * The Knot agent API, as a handful of calls.
+ * The Cheto agent API, as a handful of calls.
  *
  * Deliberately thin. Everything an agent may do is already an HTTP endpoint
  * with a bearer token; an MCP server that added its own rules would be a second
@@ -9,26 +9,26 @@
  */
 const TIMEOUT_MS = 30000;
 
-export class KnotError extends Error {
+export class ChetoError extends Error {
     constructor(message, status) {
         super(message);
-        this.name = 'KnotError';
+        this.name = 'ChetoError';
         this.status = status;
     }
 }
 
-export class Knot {
+export class Cheto {
     /**
      * Which half of the API this credential belongs to, from the credential.
      *
-     * `knot_ak_…` is an agent: one workspace, fixed by the token, and no say in
-     * how the room is arranged. `knot_ut_…` is a person from a terminal: several
+     * `cheto_ak_…` is an agent: one workspace, fixed by the token, and no say in
+     * how the room is arranged. `cheto_ut_…` is a person from a terminal: several
      * workspaces, which is why those tools ask which one, and the authority to
      * create a board — which an agent credential does not have and is not going
      * to be given. Two surfaces, two tool sets, and the token decides.
      */
     constructor({ url, token, workspace = null }) {
-        this.surface = String(token ?? '').startsWith('knot_ut_') ? 'cli' : 'agent';
+        this.surface = String(token ?? '').startsWith('cheto_ut_') ? 'cli' : 'agent';
         this.base = String(url).replace(/\/+$/, '') + `/api/v1/${this.surface}`;
         this.token = token;
 
@@ -66,8 +66,8 @@ export class Knot {
                 signal: controller.signal,
             });
         } catch (error) {
-            throw new KnotError(
-                error?.name === 'AbortError' ? `Knot did not answer within ${timeoutMs / 1000}s.` : `Could not reach Knot: ${error.message}`,
+            throw new ChetoError(
+                error?.name === 'AbortError' ? `Cheto did not answer within ${timeoutMs / 1000}s.` : `Could not reach Cheto: ${error.message}`,
                 0,
             );
         } finally {
@@ -81,7 +81,7 @@ export class Knot {
             return payload;
         }
 
-        throw new KnotError(explain(response.status, payload, this.surface), response.status);
+        throw new ChetoError(explain(response.status, payload, this.surface), response.status);
     }
 }
 
@@ -105,13 +105,13 @@ function explain(status, payload, surface = 'agent') {
 
     if (status === 401) {
         return surface === 'cli'
-            ? 'The credential is unknown, revoked or expired. Run `knot login` again.'
+            ? 'The credential is unknown, revoked or expired. Run `cheto login` again.'
             : 'The credential is unknown, revoked or expired. Issue a new token in the panel under Agents.';
     }
 
     if (status === 403) {
         return surface === 'cli'
-            ? `${said || 'Refused.'} A terminal credential reaches the workspaces you are a member of, and only what \`knot login\` granted it — one minted before a scope existed does not have that scope, and running \`knot login\` again is how it gets one.`
+            ? `${said || 'Refused.'} A terminal credential reaches the workspaces you are a member of, and only what \`cheto login\` granted it — one minted before a scope existed does not have that scope, and running \`cheto login\` again is how it gets one.`
             : `${said || 'Refused.'} Two rules cause most of these: an agent may never set a task to done — move it to review and ask somebody — and an agent may only act on work it created or holds.`;
     }
 
@@ -133,5 +133,5 @@ function explain(status, payload, surface = 'agent') {
         return 'Rate limited. Wait and try again; the polling endpoints allow 240 a minute and the rest 120.';
     }
 
-    return said || `Knot answered ${status}.`;
+    return said || `Cheto answered ${status}.`;
 }

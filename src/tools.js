@@ -1,5 +1,5 @@
 /**
- * What an agent may do in Knot, as tools.
+ * What an agent may do in Cheto, as tools.
  *
  * The set is small on purpose. `GET /inbox` answers "is there anything for me"
  * in one call, and almost every pass needs nothing else — a catalogue of thirty
@@ -13,14 +13,14 @@
  */
 export const TOOLS = [
     {
-        name: 'knot_whoami',
+        name: 'cheto_whoami',
         description:
             'Who this credential is, which workspace it acts in, who else is there and which boards exist. Call it once at the start: it answers everything needed to begin, so nothing has to be configured in advance. `participants` is how you resolve an @handle without guessing ids; `areas` is every board with its columns, and `membership.area` is your own — where the work you create lands when you do not say.',
         inputSchema: { type: 'object', properties: {} },
-        run: (knot) => knot.call('/me'),
+        run: (cheto) => cheto.call('/me'),
     },
     {
-        name: 'knot_inbox',
+        name: 'cheto_inbox',
         description:
             'Everything waiting for you right now — mentions, work you hold, reviews you owe, notifications — in one call. Branch on summary.has_work: it is false most of the time and is the only field most passes need. Reading does not mark anything read.',
         inputSchema: {
@@ -32,17 +32,17 @@ export const TOOLS = [
                 },
             },
         },
-        run: (knot, { wait }) => knot.call(`/inbox${wait ? `?wait=${Math.min(Number(wait), 25)}` : ''}`, { timeoutMs: (Number(wait || 0) + 20) * 1000 }),
+        run: (cheto, { wait }) => cheto.call(`/inbox${wait ? `?wait=${Math.min(Number(wait), 25)}` : ''}`, { timeoutMs: (Number(wait || 0) + 20) * 1000 }),
     },
     {
-        name: 'knot_tasks',
+        name: 'cheto_tasks',
         description:
-            'List tasks. Without arguments: the open ones. `assigned` "me" narrows to work you hold, review included — which knot_inbox deliberately omits. `tag` narrows to the tasks carrying ALL of the tags named, not any of them. Returns at most 100, newest first.',
+            'List tasks. Without arguments: the open ones. `assigned` "me" narrows to work you hold, review included — which cheto_inbox deliberately omits. `tag` narrows to the tasks carrying ALL of the tags named, not any of them. Returns at most 100, newest first.',
         inputSchema: {
             type: 'object',
             properties: {
                 assigned: { type: 'string', enum: ['me'] },
-                area: { type: 'string', description: 'One board only, by name, slug or id. knot_whoami lists them.' },
+                area: { type: 'string', description: 'One board only, by name, slug or id. cheto_whoami lists them.' },
                 status: { type: 'string', enum: ['inbox', 'ready', 'in_progress', 'review', 'done'] },
                 open: { type: 'boolean', description: 'Default true. Pass false to include finished work.' },
                 tag: {
@@ -52,7 +52,7 @@ export const TOOLS = [
                 },
             },
         },
-        run: async (knot, { area, ...args }) => {
+        run: async (cheto, { area, ...args }) => {
             const query = new URLSearchParams();
 
             // A board is named in words here and by slug on the wire. Resolved
@@ -60,7 +60,7 @@ export const TOOLS = [
             // fails with the list of boards rather than silently listing every
             // one of them.
             if (area !== undefined && area !== null && String(area).trim() !== '') {
-                query.set('area', (await areaFor(knot, area)).slug);
+                query.set('area', (await areaFor(cheto, area)).slug);
             }
 
             for (const [key, value] of Object.entries(args ?? {})) {
@@ -82,17 +82,17 @@ export const TOOLS = [
                 query.set(key, String(value));
             }
 
-            return knot.call(`/tasks${query.toString() ? `?${query}` : ''}`);
+            return cheto.call(`/tasks${query.toString() ? `?${query}` : ''}`);
         },
     },
     {
-        name: 'knot_task',
+        name: 'cheto_task',
         description: 'One task in full, with its comments and reviews. `allowed_transitions` tells you what it may move to next, so you do not have to reimplement the state machine.',
         inputSchema: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'] },
-        run: (knot, { id }) => knot.call(`/tasks/${id}`),
+        run: (cheto, { id }) => cheto.call(`/tasks/${id}`),
     },
     {
-        name: 'knot_task_create',
+        name: 'cheto_task_create',
         description:
             'Put a new task on the board. Use type "idea" for something that is not work yet — an idea stops being handed to whoever holds it, which is how you file a thought without it nagging somebody every five minutes. `assignee` offers it to somebody by @handle; they still have to accept.',
         inputSchema: {
@@ -103,11 +103,11 @@ export const TOOLS = [
                 type: { type: 'string', enum: ['task', 'feature', 'bug', 'chore', 'epic', 'idea'] },
                 priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },
                 status: { type: 'string', enum: ['inbox', 'ready', 'in_progress'], description: 'Where it lands. Default inbox.' },
-                assignee: { type: 'string', description: 'A participant, by @handle or slug. knot_whoami lists who is here.' },
+                assignee: { type: 'string', description: 'A participant, by @handle or slug. cheto_whoami lists who is here.' },
                 area: {
                     type: 'string',
                     description:
-                        'Which board it goes on, by name, slug or id — knot_whoami lists them. Without this it lands on your own board when your membership has one (`membership.area` in knot_whoami), and on the workspace\'s first board when it does not — which is rarely the one you meant.',
+                        'Which board it goes on, by name, slug or id — cheto_whoami lists them. Without this it lands on your own board when your membership has one (`membership.area` in cheto_whoami), and on the workspace\'s first board when it does not — which is rarely the one you meant.',
                 },
                 column: {
                     type: 'string',
@@ -120,16 +120,16 @@ export const TOOLS = [
             },
             required: ['title'],
         },
-        run: async (knot, { assignee, area, column, ...rest }) => {
-            const body = { ...rest, ...(await assigneeFields(knot, assignee)), ...(await placementFields(knot, area, column)) };
+        run: async (cheto, { assignee, area, column, ...rest }) => {
+            const body = { ...rest, ...(await assigneeFields(cheto, assignee)), ...(await placementFields(cheto, area, column)) };
 
-            return knot.call('/tasks', { method: 'POST', body, idempotencyKey: `mcp-create-${slug(rest.title)}` });
+            return cheto.call('/tasks', { method: 'POST', body, idempotencyKey: `mcp-create-${slug(rest.title)}` });
         },
     },
     {
-        name: 'knot_task_update',
+        name: 'cheto_task_update',
         description:
-            'Change what a task says about itself: title, description, type, priority, due date, tags. Saying what a thing IS is allowed; saying it is done is not — status "done" is refused for every agent, always. Use knot_task_status to move it and knot_task_assign to hand it over; this is for the text. `tags` REPLACES the whole set — knot_task_tag adds one without disturbing the others.',
+            'Change what a task says about itself: title, description, type, priority, due date, tags. Saying what a thing IS is allowed; saying it is done is not — status "done" is refused for every agent, always. Use cheto_task_status to move it and cheto_task_assign to hand it over; this is for the text. `tags` REPLACES the whole set — cheto_task_tag adds one without disturbing the others.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -145,12 +145,12 @@ export const TOOLS = [
             },
             required: ['id'],
         },
-        run: (knot, { id, ...rest }) => knot.call(`/tasks/${id}`, { method: 'PATCH', body: rest, idempotencyKey: `mcp-update-${id}-${slug(JSON.stringify(rest))}` }),
+        run: (cheto, { id, ...rest }) => cheto.call(`/tasks/${id}`, { method: 'PATCH', body: rest, idempotencyKey: `mcp-update-${id}-${slug(JSON.stringify(rest))}` }),
     },
     {
-        name: 'knot_task_status',
+        name: 'cheto_task_status',
         description:
-            'Move a task along the board: inbox → ready → in_progress → review, and back where that makes sense. "done" is NOT here and cannot be added: an agent may never close its own work. Finish by moving it to review and asking somebody with knot_review_request. knot_task reports allowed_transitions for the one you are looking at.',
+            'Move a task along the board: inbox → ready → in_progress → review, and back where that makes sense. "done" is NOT here and cannot be added: an agent may never close its own work. Finish by moving it to review and asking somebody with cheto_review_request. cheto_task reports allowed_transitions for the one you are looking at.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -159,33 +159,33 @@ export const TOOLS = [
             },
             required: ['id', 'status'],
         },
-        run: (knot, { id, status }) => knot.call(`/tasks/${id}`, { method: 'PATCH', body: { status }, idempotencyKey: `mcp-status-${id}-${status}` }),
+        run: (cheto, { id, status }) => cheto.call(`/tasks/${id}`, { method: 'PATCH', body: { status }, idempotencyKey: `mcp-status-${id}-${status}` }),
     },
     {
-        name: 'knot_task_assign',
+        name: 'cheto_task_assign',
         description:
-            'Hand a task to somebody — a person or another agent — by @handle, or take it off whoever holds it with `to: null`. Assigning is an OFFER, not an instruction: the other side still has to accept, and nothing starts on their machine because of this. To take unheld work for yourself use knot_task_claim, which also starts it.',
+            'Hand a task to somebody — a person or another agent — by @handle, or take it off whoever holds it with `to: null`. Assigning is an OFFER, not an instruction: the other side still has to accept, and nothing starts on their machine because of this. To take unheld work for yourself use cheto_task_claim, which also starts it.',
         inputSchema: {
             type: 'object',
             properties: {
                 id: { type: 'number' },
                 to: {
                     type: ['string', 'null'],
-                    description: 'A participant by @handle, slug or name — knot_whoami lists them. Explicit null unassigns.',
+                    description: 'A participant by @handle, slug or name — cheto_whoami lists them. Explicit null unassigns.',
                 },
             },
             required: ['id', 'to'],
         },
-        run: async (knot, { id, to }) => {
-            const fields = await assigneeFields(knot, to, { explicit: true });
+        run: async (cheto, { id, to }) => {
+            const fields = await assigneeFields(cheto, to, { explicit: true });
 
-            return knot.call(`/tasks/${id}`, { method: 'PATCH', body: fields, idempotencyKey: `mcp-assign-${id}-${slug(to ?? 'nobody')}` });
+            return cheto.call(`/tasks/${id}`, { method: 'PATCH', body: fields, idempotencyKey: `mcp-assign-${id}-${slug(to ?? 'nobody')}` });
         },
     },
     {
-        name: 'knot_task_tag',
+        name: 'cheto_task_tag',
         description:
-            'Add or remove tags without disturbing the rest. Both lists are names; a tag nobody has used yet is created by naming it. Reads the task first and writes back the whole set, because that is the only shape the server takes — so prefer this over knot_task_update when you mean "also tag it X".',
+            'Add or remove tags without disturbing the rest. Both lists are names; a tag nobody has used yet is created by naming it. Reads the task first and writes back the whole set, because that is the only shape the server takes — so prefer this over cheto_task_update when you mean "also tag it X".',
         inputSchema: {
             type: 'object',
             properties: {
@@ -195,8 +195,8 @@ export const TOOLS = [
             },
             required: ['id'],
         },
-        run: async (knot, { id, add = [], remove = [] }) => {
-            const { data } = await knot.call(`/tasks/${id}`);
+        run: async (cheto, { id, add = [], remove = [] }) => {
+            const { data } = await cheto.call(`/tasks/${id}`);
 
             // Matched on the slug, like the server does, so "Backend" removes a
             // tag somebody first typed as "backend".
@@ -211,36 +211,36 @@ export const TOOLS = [
                 }
             }
 
-            return knot.call(`/tasks/${id}`, { method: 'PATCH', body: { tags }, idempotencyKey: `mcp-tag-${id}-${slug(tags.join('-'))}` });
+            return cheto.call(`/tasks/${id}`, { method: 'PATCH', body: { tags }, idempotencyKey: `mcp-tag-${id}-${slug(tags.join('-'))}` });
         },
     },
     {
-        name: 'knot_task_claim',
+        name: 'cheto_task_claim',
         description: 'Take work nobody holds, and start it. Refuses anything already held — it cannot take a task away from somebody.',
         inputSchema: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'] },
-        run: (knot, { id }) => knot.call(`/tasks/${id}/claim`, { method: 'POST', idempotencyKey: `mcp-claim-${id}` }),
+        run: (cheto, { id }) => cheto.call(`/tasks/${id}/claim`, { method: 'POST', idempotencyKey: `mcp-claim-${id}` }),
     },
     {
-        name: 'knot_task_accept',
+        name: 'cheto_task_accept',
         description: 'Say yes to work already assigned to you. An assignment is an offer, not an instruction: it arrives unaccepted and waits for this.',
         inputSchema: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'] },
-        run: (knot, { id }) => knot.call(`/tasks/${id}/accept`, { method: 'POST', idempotencyKey: `mcp-accept-${id}` }),
+        run: (cheto, { id }) => cheto.call(`/tasks/${id}/accept`, { method: 'POST', idempotencyKey: `mcp-accept-${id}` }),
     },
     {
-        name: 'knot_task_comment',
+        name: 'cheto_task_comment',
         description: 'Say something on a task. Where you report what you did — commenting does not move the task, so it will not wake you again.',
         inputSchema: { type: 'object', properties: { id: { type: 'number' }, body: { type: 'string' } }, required: ['id', 'body'] },
-        run: (knot, { id, body }) => knot.call(`/tasks/${id}/comments`, { method: 'POST', body: { body }, idempotencyKey: `mcp-comment-${id}-${slug(body)}` }),
+        run: (cheto, { id, body }) => cheto.call(`/tasks/${id}/comments`, { method: 'POST', body: { body }, idempotencyKey: `mcp-comment-${id}-${slug(body)}` }),
     },
     {
-        name: 'knot_reviews',
-        description: 'Reviews you owe somebody an answer on. knot_inbox counts them; this is the list, with the task each one is about.',
+        name: 'cheto_reviews',
+        description: 'Reviews you owe somebody an answer on. cheto_inbox counts them; this is the list, with the task each one is about.',
         inputSchema: { type: 'object', properties: {} },
-        run: (knot) => knot.call('/reviews'),
+        run: (cheto) => cheto.call('/reviews'),
     },
     {
-        name: 'knot_review_request',
-        description: 'Ask somebody to look at a task. This is how work gets finished: you cannot close it, a reviewer decides. Pick the reviewer from knot_whoami participants.',
+        name: 'cheto_review_request',
+        description: 'Ask somebody to look at a task. This is how work gets finished: you cannot close it, a reviewer decides. Pick the reviewer from cheto_whoami participants.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -251,10 +251,10 @@ export const TOOLS = [
             },
             required: ['task_id', 'reviewer_type', 'reviewer_id'],
         },
-        run: (knot, { task_id: taskId, ...rest }) => knot.call(`/tasks/${taskId}/reviews`, { method: 'POST', body: rest, idempotencyKey: `mcp-review-${taskId}` }),
+        run: (cheto, { task_id: taskId, ...rest }) => cheto.call(`/tasks/${taskId}/reviews`, { method: 'POST', body: rest, idempotencyKey: `mcp-review-${taskId}` }),
     },
     {
-        name: 'knot_review_answer',
+        name: 'cheto_review_answer',
         description: 'Answer a review somebody asked of you: approved, or changes_requested. Only the named reviewer may answer, and only once. Approving records that you were satisfied; it does not close the task.',
         inputSchema: {
             type: 'object',
@@ -265,60 +265,60 @@ export const TOOLS = [
             },
             required: ['id', 'status'],
         },
-        run: (knot, { id, ...rest }) => knot.call(`/reviews/${id}`, { method: 'PATCH', body: rest, idempotencyKey: `mcp-answer-${id}` }),
+        run: (cheto, { id, ...rest }) => cheto.call(`/reviews/${id}`, { method: 'PATCH', body: rest, idempotencyKey: `mcp-answer-${id}` }),
     },
     {
-        name: 'knot_channels',
+        name: 'cheto_channels',
         description: 'The rooms in this workspace.',
         inputSchema: { type: 'object', properties: {} },
-        run: (knot) => knot.call('/channels'),
+        run: (cheto) => cheto.call('/channels'),
     },
     {
-        name: 'knot_channel_read',
+        name: 'cheto_channel_read',
         description:
             'What is being said in a channel, bounded. Returns the last few folded summaries plus the handful of messages after them — an amount of text whose size does not grow as the channel does. Prefer this over reading every message.',
         inputSchema: { type: 'object', properties: { channel: { type: 'string', description: 'slug or id' } }, required: ['channel'] },
-        run: (knot, { channel }) => knot.call(`/channels/${encodeURIComponent(channel)}/context`),
+        run: (cheto, { channel }) => cheto.call(`/channels/${encodeURIComponent(channel)}/context`),
     },
     {
-        name: 'knot_channel_post',
+        name: 'cheto_channel_post',
         description: 'Say something in a channel. Write @handle to name somebody — people and agents alike, resolved server-side.',
         inputSchema: { type: 'object', properties: { channel: { type: 'string' }, body: { type: 'string' } }, required: ['channel', 'body'] },
-        run: (knot, { channel, body }) =>
-            knot.call(`/channels/${encodeURIComponent(channel)}/messages`, { method: 'POST', body: { body }, idempotencyKey: `mcp-post-${channel}-${slug(body)}` }),
+        run: (cheto, { channel, body }) =>
+            cheto.call(`/channels/${encodeURIComponent(channel)}/messages`, { method: 'POST', body: { body }, idempotencyKey: `mcp-post-${channel}-${slug(body)}` }),
     },
     {
-        name: 'knot_search',
+        name: 'cheto_search',
         description: 'Reach past the bounded read, into everything that was said before it. Use it instead of asking for a bigger window.',
         inputSchema: {
             type: 'object',
             properties: { q: { type: 'string' }, kind: { type: 'string', enum: ['message', 'task', 'comment', 'compact'] } },
             required: ['q'],
         },
-        run: (knot, { q, kind }) => knot.call(`/search?q=${encodeURIComponent(q)}${kind ? `&kind=${kind}` : ''}`),
+        run: (cheto, { q, kind }) => cheto.call(`/search?q=${encodeURIComponent(q)}${kind ? `&kind=${kind}` : ''}`),
     },
     {
-        name: 'knot_memory',
+        name: 'cheto_memory',
         description: 'What this workspace worked out, as against what it said. Read it before asking somebody a question they have already answered.',
         inputSchema: { type: 'object', properties: {} },
-        run: (knot) => knot.call('/memory'),
+        run: (cheto) => cheto.call('/memory'),
     },
     {
-        name: 'knot_memory_write',
+        name: 'cheto_memory_write',
         description: 'Write something down for everybody, so it is not rediscovered next week. `key` makes it addressable by name later.',
         inputSchema: {
             type: 'object',
             properties: { title: { type: 'string' }, body: { type: 'string' }, key: { type: 'string' } },
             required: ['title', 'body'],
         },
-        run: (knot, args) => knot.call('/memory', { method: 'POST', body: args, idempotencyKey: `mcp-memory-${slug(args.key ?? args.title)}` }),
+        run: (cheto, args) => cheto.call('/memory', { method: 'POST', body: args, idempotencyKey: `mcp-memory-${slug(args.key ?? args.title)}` }),
     },
     {
-        name: 'knot_heartbeat',
+        name: 'cheto_heartbeat',
         description:
             'Say you are still here. Presence is derived from this and nothing else: a connection that goes quiet for ten minutes stops counting, and the agent shows as offline. Send one while you work.',
         inputSchema: { type: 'object', properties: { status: { type: 'string', enum: ['online', 'busy', 'offline'] } } },
-        run: (knot, { status }) => knot.call('/heartbeat', { method: 'POST', body: status ? { status } : {} }),
+        run: (cheto, { status }) => cheto.call('/heartbeat', { method: 'POST', body: status ? { status } : {} }),
     },
 ];
 
@@ -344,7 +344,7 @@ function slugOf(value) {
  *
  * The API wants ids, and a model holding a conversation has handles — so the
  * lookup happens here rather than being pushed back at the caller as "call
- * knot_whoami first, then read the list, then call me again". Three round trips
+ * cheto_whoami first, then read the list, then call me again". Three round trips
  * for a thing the server already answered.
  *
  * Resolved against **this workspace's participants only**, which is the same
@@ -352,7 +352,7 @@ function slugOf(value) {
  * another workspace simply is not found.
  *
  * `explicit` is what separates "assign nobody" from "do not touch the assignee".
- * knot_task_assign says null to unassign and means it; knot_task_create leaving
+ * cheto_task_assign says null to unassign and means it; cheto_task_create leaving
  * it out means nothing was asked for, and sending `assignee_type: null` there
  * would be the same request with a different meaning.
  */
@@ -360,7 +360,7 @@ function slugOf(value) {
  * A board, and optionally one of its columns, as the ids the API takes.
  *
  * The same trade `assigneeFields` makes for people. A model reads "Marketing &
- * Reels" off `knot_whoami` and should be able to send that back; ids are what
+ * Reels" off `cheto_whoami` and should be able to send that back; ids are what
  * the server takes, and the translation belongs here rather than in a prompt
  * telling a model to remember a number.
  *
@@ -369,16 +369,16 @@ function slugOf(value) {
  * which is how a fleet of agents filed three hundred tasks in the wrong place
  * without anybody noticing. A wrong board is worse than a refusal.
  */
-async function placementFields(knot, area, column) {
+async function placementFields(cheto, area, column) {
     if (isBlank(area)) {
         if (!isBlank(column)) {
-            throw new Error('A column belongs to a board, so `column` needs `area` as well. knot_whoami lists both.');
+            throw new Error('A column belongs to a board, so `column` needs `area` as well. cheto_whoami lists both.');
         }
 
         return {};
     }
 
-    const board = await areaFor(knot, area);
+    const board = await areaFor(cheto, area);
 
     if (isBlank(column)) {
         return { work_area_id: board.id };
@@ -401,9 +401,9 @@ async function placementFields(knot, area, column) {
 }
 
 /** One board of this workspace, by name, slug or id. */
-async function areaFor(knot, area) {
+async function areaFor(cheto, area) {
     const wanted = String(area).trim().toLowerCase();
-    const { areas = [] } = await knot.call('/me');
+    const { areas = [] } = await cheto.call('/me');
 
     const match =
         areas.find((candidate) => String(candidate.id) === wanted) ??
@@ -423,7 +423,7 @@ function isBlank(value) {
     return value === undefined || value === null || String(value).trim() === '';
 }
 
-async function assigneeFields(knot, who, { explicit = false } = {}) {
+async function assigneeFields(cheto, who, { explicit = false } = {}) {
     if (who === undefined || (who === null && !explicit)) {
         return {};
     }
@@ -433,7 +433,7 @@ async function assigneeFields(knot, who, { explicit = false } = {}) {
     }
 
     const wanted = String(who).trim().replace(/^@/, '').toLowerCase();
-    const { participants = [] } = await knot.call('/me');
+    const { participants = [] } = await cheto.call('/me');
 
     const match =
         participants.find((person) => String(person.slug ?? '').toLowerCase() === wanted) ??
