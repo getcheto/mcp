@@ -1,6 +1,6 @@
-# knot-mcp
+# cheto-mcp
 
-Knot as MCP tools, so an agent works in a workspace without a CLI and without
+Cheto as MCP tools, so an agent works in a workspace without a CLI and without
 anybody writing HTTP calls by hand.
 
 Zero dependencies. Node 20+.
@@ -10,12 +10,12 @@ Zero dependencies. Node 20+.
 ```json
 {
   "mcpServers": {
-    "knot": {
+    "cheto": {
       "command": "node",
-      "args": ["/absolute/path/to/knot-mcp/bin/knot-mcp.js"],
+      "args": ["/absolute/path/to/cheto-mcp/bin/cheto-mcp.js"],
       "env": {
-        "KNOT_URL": "https://your-knot",
-        "KNOT_TOKEN": "knot_ak_..."
+        "CHETO_URL": "https://your-cheto",
+        "CHETO_TOKEN": "cheto_ak_..."
       }
     }
   }
@@ -27,17 +27,17 @@ once. A credential reaches exactly one agent in exactly one workspace — the
 workspace comes from the token, never from a request, so there is no way for one
 to reach somewhere it should not.
 
-On a machine that has run `knot connect`, drop both: the credential is already
-in the keychain and the server reads it. `KNOT_AGENT=<handle>` picks between
-several. `KNOT_WORKSPACE` is optional and only means something with a human
+On a machine that has run `cheto connect`, drop both: the credential is already
+in the keychain and the server reads it. `CHETO_AGENT=<handle>` picks between
+several. `CHETO_WORKSPACE` is optional and only means something with a human
 credential — see below.
 
 ## What it offers
 
-`knot_whoami` first: it answers who you are, where you are and who else is
+`cheto_whoami` first: it answers who you are, where you are and who else is
 there, so nothing has to be configured in advance.
 
-`knot_inbox` is the call for every pass after that — mentions, work you hold,
+`cheto_inbox` is the call for every pass after that — mentions, work you hold,
 reviews you owe, in one request. Branch on `summary.has_work`; it is false most
 of the time.
 
@@ -47,16 +47,16 @@ write the workspace's memory.
 
 ## As yourself, with no token to paste
 
-`knot login` authorizes you once, in a browser, and leaves the credential in the
+`cheto login` authorizes you once, in a browser, and leaves the credential in the
 OS keychain. Point the server at that and there is nothing to copy anywhere:
 
 ```json
 {
   "mcpServers": {
-    "knot-admin": {
+    "cheto-admin": {
       "command": "node",
-      "args": ["/absolute/path/to/knot-mcp/bin/knot-mcp.js"],
-      "env": { "KNOT_AS": "user", "KNOT_URL": "https://your-knot", "KNOT_WORKSPACE": "appsi" }
+      "args": ["/absolute/path/to/cheto-mcp/bin/cheto-mcp.js"],
+      "env": { "CHETO_AS": "user", "CHETO_URL": "https://your-cheto", "CHETO_WORKSPACE": "appsi" }
     }
   }
 }
@@ -68,18 +68,18 @@ happens in it:
 
 | | |
 | --- | --- |
-| `knot_whoami` | who you are, what the credential was granted, which workspaces it reaches |
-| `knot_areas` · `knot_area_create` · `knot_area_update` | the boards, with their own columns |
-| `knot_column_add` · `knot_column_update` · `knot_columns_reorder` · `knot_column_remove` | and the columns on them |
-| `knot_agents` · `knot_agent_create` · `knot_agent_update` · `knot_agent_join` | the agents you own, and where each one works |
-| `knot_agent_pair` · `knot_agent_token` · `knot_agent_disconnect` | arming a machine for one, and disarming it |
-| `knot_tasks` · `knot_task_create` | reading a board back, and filing work under your own name |
+| `cheto_whoami` | who you are, what the credential was granted, which workspaces it reaches |
+| `cheto_areas` · `cheto_area_create` · `cheto_area_update` | the boards, with their own columns |
+| `cheto_column_add` · `cheto_column_update` · `cheto_columns_reorder` · `cheto_column_remove` | and the columns on them |
+| `cheto_agents` · `cheto_agent_create` · `cheto_agent_update` · `cheto_agent_join` | the agents you own, and where each one works |
+| `cheto_agent_pair` · `cheto_agent_token` · `cheto_agent_disconnect` | arming a machine for one, and disarming it |
+| `cheto_tasks` · `cheto_task_create` | reading a board back, and filing work under your own name |
 
 The job that made them worth building is **importing**: eighty projects from
 another tracker, each with its own sections, is eighty boards and four hundred
 columns. Setting up a fleet of agents has the same shape.
 
-`KNOT_WORKSPACE` sets the default workspace, so one entry per workspace is a
+`CHETO_WORKSPACE` sets the default workspace, so one entry per workspace is a
 reasonable way to run this — point a second at `savia` and neither model has to
 remember which room it is in.
 

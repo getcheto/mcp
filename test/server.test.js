@@ -1,7 +1,7 @@
 /**
  * The protocol, and the one decision worth pinning.
  *
- * A refusal from Knot is an answer, not a transport failure. Returned as tool
+ * A refusal from Cheto is an answer, not a transport failure. Returned as tool
  * content with `isError`, the model reads why and adapts; returned as a JSON-RPC
  * error it never sees the reason and retries the same call with different
  * arguments. Everything else here is protocol shape.
@@ -25,7 +25,7 @@ async function exchange(requests, { fetchImpl, env = {} } = {}) {
         globalThis.fetch = fetchImpl;
     }
 
-    const running = serve({ input, output, env: { KNOT_URL: 'http://knot.test', KNOT_TOKEN: 'knot_ak_x', ...env } });
+    const running = serve({ input, output, env: { CHETO_URL: 'http://cheto.test', CHETO_TOKEN: 'cheto_ak_x', ...env } });
 
     for (const request of requests) {
         input.write(JSON.stringify(request) + '\n');
@@ -51,7 +51,7 @@ describe('the MCP surface', () => {
             { jsonrpc: '2.0', id: 2, method: 'tools/list' },
         ]);
 
-        assert.equal(answers[0].result.serverInfo.name, 'knot');
+        assert.equal(answers[0].result.serverInfo.name, 'cheto');
         assert.equal(answers[1].result.tools.length, TOOLS.length);
         assert.ok(answers[1].result.tools.every((tool) => tool.description && tool.inputSchema));
     });
@@ -68,7 +68,7 @@ describe('the MCP surface', () => {
     });
 
     it('hands a refusal back as something the model can read', async () => {
-        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'knot_task_update', arguments: { id: 1, status: 'done' } } }], {
+        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_update', arguments: { id: 1, status: 'done' } } }], {
             fetchImpl: ok({ message: 'This action is unauthorized.' }, 403),
         });
 
@@ -80,7 +80,7 @@ describe('the MCP surface', () => {
     });
 
     it('explains a dead credential instead of repeating the number', async () => {
-        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'knot_whoami', arguments: {} } }], {
+        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_whoami', arguments: {} } }], {
             fetchImpl: ok({ message: 'Unauthenticated.' }, 401),
         });
 
@@ -88,7 +88,7 @@ describe('the MCP surface', () => {
     });
 
     it('refuses a tool it does not have', async () => {
-        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'knot_delete_everything', arguments: {} } }]);
+        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_delete_everything', arguments: {} } }]);
 
         assert.equal(answers[0].error.code, -32602);
     });
@@ -109,10 +109,10 @@ describe('the tool set', () => {
         // the day somebody adds a second way to move one is the day this rule
         // gets re-implemented, and it has to be re-checked with it.
         //
-        // `knot_tasks` is excluded because it reads. Filtering on done is how
+        // `cheto_tasks` is excluded because it reads. Filtering on done is how
         // you find finished work, and refusing that would not stop an agent
         // closing anything — it would only stop it looking.
-        const pickable = TOOLS.filter((tool) => tool.name !== 'knot_tasks')
+        const pickable = TOOLS.filter((tool) => tool.name !== 'cheto_tasks')
             .map((tool) => tool.inputSchema?.properties?.status?.enum)
             .filter(Boolean);
 
@@ -125,7 +125,7 @@ describe('naming somebody', () => {
     it('turns an @handle into the pair the API takes', async () => {
         const sent = [];
 
-        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'knot_task_assign', arguments: { id: 7, to: '@magui' } } }], {
+        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_assign', arguments: { id: 7, to: '@magui' } } }], {
             fetchImpl: async (url, options) => {
                 sent.push({ url, body: options.body ? JSON.parse(options.body) : null });
 
@@ -147,7 +147,7 @@ describe('naming somebody', () => {
     });
 
     it('says who is actually here when the handle is wrong', async () => {
-        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'knot_task_assign', arguments: { id: 7, to: 'nobody' } } }], {
+        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_assign', arguments: { id: 7, to: 'nobody' } } }], {
             fetchImpl: ok({ participants: [{ type: 'agent', id: 6, name: 'Magui', slug: 'magui' }] }),
         });
 
@@ -158,7 +158,7 @@ describe('naming somebody', () => {
     it('unassigns on an explicit null', async () => {
         const sent = [];
 
-        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'knot_task_assign', arguments: { id: 7, to: null } } }], {
+        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_assign', arguments: { id: 7, to: null } } }], {
             fetchImpl: async (url, options) => {
                 sent.push(options.body ? JSON.parse(options.body) : null);
 
@@ -201,7 +201,7 @@ describe('naming a board', () => {
         const sent = [];
 
         const answers = await exchange(
-            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'knot_task_create', arguments: { title: 'A reel', area: 'Marketing & Reels' } } }],
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_create', arguments: { title: 'A reel', area: 'Marketing & Reels' } } }],
             { fetchImpl: spy(sent) },
         );
 
@@ -213,7 +213,7 @@ describe('naming a board', () => {
         for (const area of ['marketing-reels', 16, '16']) {
             const sent = [];
 
-            await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'knot_task_create', arguments: { title: 'A reel', area } } }], {
+            await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_create', arguments: { title: 'A reel', area } } }], {
                 fetchImpl: spy(sent),
             });
 
@@ -230,7 +230,7 @@ describe('naming a board', () => {
                     jsonrpc: '2.0',
                     id: 1,
                     method: 'tools/call',
-                    params: { name: 'knot_task_create', arguments: { title: 'Chase it', area: 'marketing-reels', column: 'Waiting on customer' } },
+                    params: { name: 'cheto_task_create', arguments: { title: 'Chase it', area: 'marketing-reels', column: 'Waiting on customer' } },
                 },
             ],
             { fetchImpl: spy(sent) },
@@ -243,7 +243,7 @@ describe('naming a board', () => {
 
     it('lists the boards there are when the name is wrong, rather than filing it anywhere', async () => {
         const answers = await exchange(
-            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'knot_task_create', arguments: { title: 'A reel', area: 'Marketng' } } }],
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_create', arguments: { title: 'A reel', area: 'Marketng' } } }],
             { fetchImpl: ok(workspace) },
         );
 
@@ -260,7 +260,7 @@ describe('naming a board', () => {
                     jsonrpc: '2.0',
                     id: 1,
                     method: 'tools/call',
-                    params: { name: 'knot_task_create', arguments: { title: 'A reel', area: 'marketing-reels', column: 'Blocked' } },
+                    params: { name: 'cheto_task_create', arguments: { title: 'A reel', area: 'marketing-reels', column: 'Blocked' } },
                 },
             ],
             { fetchImpl: ok(workspace) },
@@ -272,7 +272,7 @@ describe('naming a board', () => {
 
     it('refuses a column with no board, because a column belongs to one', async () => {
         const answers = await exchange(
-            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'knot_task_create', arguments: { title: 'A reel', column: 'Waiting on customer' } } }],
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_create', arguments: { title: 'A reel', column: 'Waiting on customer' } } }],
             { fetchImpl: ok(workspace) },
         );
 
@@ -283,7 +283,7 @@ describe('naming a board', () => {
     it('narrows a listing to one board, by slug', async () => {
         const sent = [];
 
-        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'knot_tasks', arguments: { area: 'Marketing & Reels', status: 'ready' } } }], {
+        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_tasks', arguments: { area: 'Marketing & Reels', status: 'ready' } } }], {
             fetchImpl: spy(sent),
         });
 
@@ -293,7 +293,7 @@ describe('naming a board', () => {
     it('leaves a listing alone when no board is named', async () => {
         const sent = [];
 
-        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'knot_tasks', arguments: {} } }], { fetchImpl: spy(sent) });
+        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_tasks', arguments: {} } }], { fetchImpl: spy(sent) });
 
         // And without asking which boards exist: there is nothing to resolve.
         assert.equal(sent.length, 1);
@@ -305,7 +305,7 @@ describe('tagging', () => {
     it('adds one without dropping the others', async () => {
         const sent = [];
 
-        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'knot_task_tag', arguments: { id: 7, add: ['urgent'], remove: ['Backend'] } } }], {
+        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_tag', arguments: { id: 7, add: ['urgent'], remove: ['Backend'] } } }], {
             fetchImpl: async (url, options) => {
                 if (options.method === 'PATCH') {
                     sent.push(JSON.parse(options.body));
@@ -328,7 +328,7 @@ describe('tagging', () => {
 });
 
 describe('the credential decides the surface', () => {
-    const human = { KNOT_TOKEN: 'knot_ut_x' };
+    const human = { CHETO_TOKEN: 'cheto_ut_x' };
 
     const board = {
         data: [
@@ -348,18 +348,18 @@ describe('the credential decides the surface', () => {
 
         const names = (answers) => answers[0].result.tools.map((tool) => tool.name);
 
-        assert.ok(names(asHuman).includes('knot_area_create'));
-        assert.ok(names(asHuman).includes('knot_column_add'));
+        assert.ok(names(asHuman).includes('cheto_area_create'));
+        assert.ok(names(asHuman).includes('cheto_column_add'));
 
         // The wall, in the one place a model could have walked through it: an
         // agent credential is never handed a tool that redraws the room.
-        assert.ok(!names(asAgent).includes('knot_area_create'));
-        assert.ok(!names(asAgent).includes('knot_column_add'));
+        assert.ok(!names(asAgent).includes('cheto_area_create'));
+        assert.ok(!names(asAgent).includes('cheto_column_add'));
 
         // And the reverse, so neither set is quietly a superset of the other:
         // a person's credential is not an agent and has no inbox of its own.
-        assert.ok(names(asAgent).includes('knot_inbox'));
-        assert.ok(!names(asHuman).includes('knot_inbox'));
+        assert.ok(names(asAgent).includes('cheto_inbox'));
+        assert.ok(!names(asHuman).includes('cheto_inbox'));
     });
 
     it('talks to the human half of the API, not the agent half', async () => {
@@ -372,7 +372,7 @@ describe('the credential decides the surface', () => {
                     id: 1,
                     method: 'tools/call',
                     params: {
-                        name: 'knot_area_create',
+                        name: 'cheto_area_create',
                         arguments: {
                             workspace: 'appsi',
                             name: 'Marketing & Reels',
@@ -391,7 +391,7 @@ describe('the credential decides the surface', () => {
             },
         );
 
-        assert.equal(sent[0].url, 'http://knot.test/api/v1/cli/areas');
+        assert.equal(sent[0].url, 'http://cheto.test/api/v1/cli/areas');
         assert.deepEqual(sent[0].body, {
             workspace: 'appsi',
             name: 'Marketing & Reels',
@@ -402,8 +402,8 @@ describe('the credential decides the surface', () => {
     it('falls back to the workspace the server was started for', async () => {
         const sent = [];
 
-        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'knot_areas', arguments: {} } }], {
-            env: { ...human, KNOT_WORKSPACE: 'savia' },
+        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_areas', arguments: {} } }], {
+            env: { ...human, CHETO_WORKSPACE: 'savia' },
             fetchImpl: async (url) => {
                 sent.push(url);
 
@@ -411,17 +411,17 @@ describe('the credential decides the surface', () => {
             },
         });
 
-        assert.equal(sent[0], 'http://knot.test/api/v1/cli/areas?workspace=savia');
+        assert.equal(sent[0], 'http://cheto.test/api/v1/cli/areas?workspace=savia');
     });
 
     it('asks which workspace when nothing says', async () => {
-        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'knot_areas', arguments: {} } }], {
+        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_areas', arguments: {} } }], {
             env: human,
             fetchImpl: ok(board),
         });
 
         assert.equal(answers[0].result.isError, true);
-        assert.match(answers[0].result.content[0].text, /KNOT_WORKSPACE/);
+        assert.match(answers[0].result.content[0].text, /CHETO_WORKSPACE/);
     });
 
     it('administers agents without ever being able to speak as one', async () => {
@@ -429,8 +429,8 @@ describe('the credential decides the surface', () => {
             (tool) => tool.name,
         );
 
-        // Everything `knot agent …` does from a terminal, as tools.
-        for (const tool of ['knot_agents', 'knot_agent_create', 'knot_agent_update', 'knot_agent_join', 'knot_agent_pair', 'knot_agent_token', 'knot_agent_disconnect']) {
+        // Everything `cheto agent …` does from a terminal, as tools.
+        for (const tool of ['cheto_agents', 'cheto_agent_create', 'cheto_agent_update', 'cheto_agent_join', 'cheto_agent_pair', 'cheto_agent_token', 'cheto_agent_disconnect']) {
             assert.ok(names.includes(tool), `expected ${tool}`);
         }
 
@@ -447,7 +447,7 @@ describe('the credential decides the surface', () => {
                     jsonrpc: '2.0',
                     id: 1,
                     method: 'tools/call',
-                    params: { name: 'knot_agent_token', arguments: { membership: 6, name: 'mcp' } },
+                    params: { name: 'cheto_agent_token', arguments: { membership: 6, name: 'mcp' } },
                 },
             ],
             {
@@ -455,14 +455,14 @@ describe('the credential decides the surface', () => {
                 fetchImpl: async (url, options) => {
                     sent.push({ url, body: options.body ? JSON.parse(options.body) : null });
 
-                    return { ok: true, status: 201, text: async () => JSON.stringify({ token: 'knot_ak_x' }) };
+                    return { ok: true, status: 201, text: async () => JSON.stringify({ token: 'cheto_ak_x' }) };
                 },
             },
         );
 
         // A credential is scoped to one membership — one agent in one workspace
         // — so that is what it is asked of.
-        assert.equal(sent[0].url, 'http://knot.test/api/v1/cli/memberships/6/credentials');
+        assert.equal(sent[0].url, 'http://cheto.test/api/v1/cli/memberships/6/credentials');
         assert.deepEqual(sent[0].body, { name: 'mcp' });
     });
 
@@ -475,7 +475,7 @@ describe('the credential decides the surface', () => {
                     jsonrpc: '2.0',
                     id: 1,
                     method: 'tools/call',
-                    params: { name: 'knot_agent_update', arguments: { agent: 6, workspace: 'appsi', area: 'none' } },
+                    params: { name: 'cheto_agent_update', arguments: { agent: 6, workspace: 'appsi', area: 'none' } },
                 },
             ],
             {
@@ -496,8 +496,8 @@ describe('the credential decides the surface', () => {
     it('reads a board back before writing to it again', async () => {
         const sent = [];
 
-        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'knot_tasks', arguments: { area: 'Marketing & Reels' } } }], {
-            env: { ...human, KNOT_WORKSPACE: 'appsi' },
+        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_tasks', arguments: { area: 'Marketing & Reels' } } }], {
+            env: { ...human, CHETO_WORKSPACE: 'appsi' },
             fetchImpl: async (url) => {
                 sent.push(url);
 
@@ -507,7 +507,7 @@ describe('the credential decides the surface', () => {
 
         // The board is named in words and resolved to an id before the listing
         // is asked for, so "Marketing & Reels" never reaches the query string.
-        assert.equal(sent.at(-1), 'http://knot.test/api/v1/cli/tasks?workspace=appsi&area=16');
+        assert.equal(sent.at(-1), 'http://cheto.test/api/v1/cli/tasks?workspace=appsi&area=16');
     });
 
     it('files a task on the board it was told to, by name', async () => {
@@ -519,7 +519,7 @@ describe('the credential decides the surface', () => {
                     jsonrpc: '2.0',
                     id: 1,
                     method: 'tools/call',
-                    params: { name: 'knot_task_create', arguments: { workspace: 'appsi', title: 'Un reel', area: 'Marketing & Reels' } },
+                    params: { name: 'cheto_task_create', arguments: { workspace: 'appsi', title: 'Un reel', area: 'Marketing & Reels' } },
                 },
             ],
             {
@@ -542,7 +542,7 @@ describe('the credential decides the surface', () => {
                     jsonrpc: '2.0',
                     id: 1,
                     method: 'tools/call',
-                    params: { name: 'knot_task_create', arguments: { workspace: 'appsi', title: 'Un reel', area: 'Marketng' } },
+                    params: { name: 'cheto_task_create', arguments: { workspace: 'appsi', title: 'Un reel', area: 'Marketng' } },
                 },
             ],
             { env: human, fetchImpl: ok(board) },
