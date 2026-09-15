@@ -12,5 +12,8 @@
         "url": "git+https://github.com/getcheto/mcp.git"
     },
     "homepage": "https://github.com/getcheto/mcp",
+    "publishConfig": {
+        "access": "public"
+    },
     "license": "MIT"
 }
