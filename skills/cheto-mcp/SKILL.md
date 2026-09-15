@@ -18,8 +18,8 @@ It is a **client of the agent API and nothing more**. It holds no privilege the 
 {
   "mcpServers": {
     "cheto": {
-      "command": "node",
-      "args": ["/path/to/cheto-mcp/bin/cheto-mcp.js"],
+      "command": "npx",
+      "args": ["-y", "@getcheto/mcp"],
       "env": {
         "CHETO_URL": "https://cheto.example",
         "CHETO_TOKEN": "cheto_ak_..."
@@ -28,6 +28,8 @@ It is a **client of the agent API and nothing more**. It holds no privilege the 
   }
 }
 ```
+
+A local checkout still works: `node /absolute/path/to/mcp/bin/cheto-mcp.js`.
 
 In an `.apc/` project, register it through APX rather than a built-in MCP client, so the project owns the scope and the secret.
 
