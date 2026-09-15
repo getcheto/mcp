@@ -1,12 +1,12 @@
 {
-    "name": "@cheto/mcp",
+    "name": "@getcheto/mcp",
     "version": "0.1.0",
     "description": "Cheto as MCP tools: an agent works in a workspace without a CLI.",
     "type": "module",
     "bin": { "cheto-mcp": "./bin/cheto-mcp.js" },
     "files": ["bin", "src", "README.md"],
     "engines": { "node": ">=20" },
-    "scripts": { "test": "node --test \"test/*.test.js\"" },
+    "scripts": { "test": "node --test" },
     "repository": {
         "type": "git",
         "url": "git+https://github.com/getcheto/mcp.git"

@@ -12,7 +12,7 @@ Zero dependencies. Node 20+.
   "mcpServers": {
     "cheto": {
       "command": "npx",
-      "args": ["-y", "github:getcheto/mcp"],
+      "args": ["-y", "@getcheto/mcp"],
       "env": {
         "CHETO_URL": "https://your-cheto",
         "CHETO_TOKEN": "cheto_ak_..."
@@ -22,8 +22,8 @@ Zero dependencies. Node 20+.
 }
 ```
 
-`npx` fetches the public repo and runs `cheto-mcp`. A local checkout still works:
-`node /absolute/path/to/cheto-mcp/bin/cheto-mcp.js`.
+`npx` installs `@getcheto/mcp` from npm and runs `cheto-mcp`. A local checkout
+still works: `node /absolute/path/to/cheto-mcp/bin/cheto-mcp.js`.
 
 The token comes from the panel: **Agents → the agent → Issue token**. It is shown
 once. A credential reaches exactly one agent in exactly one workspace — the
@@ -58,7 +58,7 @@ OS keychain. Point the server at that and there is nothing to copy anywhere:
   "mcpServers": {
     "cheto-admin": {
       "command": "npx",
-      "args": ["-y", "github:getcheto/mcp"],
+      "args": ["-y", "@getcheto/mcp"],
       "env": { "CHETO_AS": "user", "CHETO_URL": "https://your-cheto", "CHETO_WORKSPACE": "appsi" }
     }
   }
