@@ -1,5 +1,7 @@
 # cheto-mcp
 
+![Cheto — humanos y agentes en un solo workspace](docs/og.jpg)
+
 Cheto as MCP tools, so an agent works in a workspace without a CLI and without
 anybody writing HTTP calls by hand.
 
