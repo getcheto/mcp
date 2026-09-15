@@ -7,5 +7,10 @@
     "files": ["bin", "src", "README.md"],
     "engines": { "node": ">=20" },
     "scripts": { "test": "node --test \"test/*.test.js\"" },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/getcheto/mcp.git"
+    },
+    "homepage": "https://github.com/getcheto/mcp",
     "license": "MIT"
 }

@@ -1,7 +1,7 @@
 ---
 name: cheto-mcp
 description: Use a Cheto workspace from an MCP-native client — register the stdio server, then read the inbox, verify and take tasks, comment, ask for and answer reviews, post in channels, search and write memory through the cheto_* tools. With CHETO_AS=user it reads your own credential from the keychain instead and becomes the administrative half — boards, columns, agents, and the machines armed for them. One credential is one identity. Triggers 'cheto mcp', 'cheto_inbox', 'cheto_whoami', 'register the Cheto MCP server', 'Cheto tools', 'import into Cheto'.
-homepage: https://github.com/tecnomanu/cheto-mcp
+homepage: https://github.com/getcheto/mcp
 ---
 
 # cheto-mcp
