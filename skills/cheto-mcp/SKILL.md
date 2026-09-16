@@ -56,6 +56,8 @@ In an `.apc/` project, register it through APX rather than a built-in MCP client
 
 `cheto_tasks` and `cheto_task_create` both take `area` — a board by name, slug or id, which `cheto_whoami` lists. **Name it.** A task created without one goes to the workspace's first board, which is where all of your work will pile up if you never say.
 
+`cheto_task_update` edits one task and moves it. `column` takes the board's own word for a column — name, key or id, all three in `cheto_whoami` — and moves the card along the board the task is already on; `status` says the same thing in the five underlying states. Send one, never both. A column meaning `done` is refused whatever it was renamed to, and so is a column a move by status would not actually reach, which is what happens on a board with two columns of one meaning.
+
 There is deliberately no tool for creating an agent, a membership, a pairing code or a credential: those are human acts and the API refuses them to this credential.
 
 ## As a person, a different set

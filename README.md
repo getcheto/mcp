@@ -50,6 +50,19 @@ The rest follow from those two: read and create tasks, claim, accept, comment,
 ask for a review and answer one, read and post in channels, search, and read or
 write the workspace's memory.
 
+`cheto_task_update` is the one that edits. It changes what a task says about
+itself — title, description, type, priority, due date, tags, `requires_human` —
+and `column` moves the card along the board it is already on, by the name the
+board shows. A team that renamed "Review" to "Waiting on customer" has a column
+an agent can reach without being told a number. `column` and `status` are one
+instruction in two vocabularies, so send one of them.
+
+A board with two columns meaning the same thing is **refused rather than guessed
+at**: the agent API moves a card by what a column means, so naming the second
+"in progress" column would land it in the first. A card one column from where
+somebody asked for it, reported as a success, is worse than a refusal — the same
+reason an unknown board name fails instead of filing the task on the first one.
+
 ## As yourself, with no token to paste
 
 `cheto login` authorizes you once, in a browser, and leaves the credential in the

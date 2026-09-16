@@ -327,6 +327,186 @@ describe('tagging', () => {
     });
 });
 
+describe('moving a card between columns', () => {
+    // One board with two columns meaning the same thing, which is the case the
+    // whole guard exists for, plus a done column somebody renamed.
+    const workspace = {
+        areas: [
+            {
+                id: 16,
+                name: 'Marketing & Reels',
+                slug: 'marketing-reels',
+                statuses: [
+                    { id: 60, name: 'Inbox', key: 'inbox', category: { value: 'inbox' }, position: 0 },
+                    { id: 62, name: 'In progress', key: 'in_progress', category: { value: 'in_progress' }, position: 1 },
+                    { id: 64, name: 'Waiting on customer', key: 'waiting_on_customer', category: { value: 'in_progress' }, position: 2 },
+                    { id: 66, name: 'Review', key: 'review', category: { value: 'review' }, position: 3 },
+                    { id: 68, name: 'Shipped', key: 'done', category: { value: 'done' }, position: 4 },
+                ],
+            },
+        ],
+    };
+
+    const spy = (sent, { task = { id: 391, work_area_id: 16 }, patched = { id: 391 } } = {}) => async (url, options) => {
+        sent.push({ url, method: options.method ?? 'GET', body: options.body ? JSON.parse(options.body) : null });
+
+        const answer = url.endsWith('/me') ? workspace : { data: options.method === 'PATCH' ? patched : task };
+
+        return { ok: true, status: 200, text: async () => JSON.stringify(answer) };
+    };
+
+    it('names the column and what it means, along the board the task is already on', async () => {
+        const sent = [];
+
+        const answers = await exchange(
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_update', arguments: { id: 391, column: 'Review' } } }],
+            { fetchImpl: spy(sent) },
+        );
+
+        assert.equal(answers[0].result.isError, undefined);
+
+        // Both: the id is the exact column and is what the panel sends, the
+        // status is what the agent endpoint reads today. Whichever the server
+        // understands, the card ends up in the same place.
+        assert.deepEqual(sent.at(-1), {
+            url: 'http://cheto.test/api/v1/agent/tasks/391',
+            method: 'PATCH',
+            body: { work_area_status_id: 66, status: 'review' },
+        });
+    });
+
+    it('takes a column key or id just as well as its name', async () => {
+        for (const column of ['review', 66, '66']) {
+            const sent = [];
+
+            await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_update', arguments: { id: 391, column } } }], {
+                fetchImpl: spy(sent),
+            });
+
+            assert.deepEqual(sent.at(-1).body, { work_area_status_id: 66, status: 'review' });
+        }
+    });
+
+    it('edits the text without asking the board anything', async () => {
+        const sent = [];
+
+        await exchange(
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_update', arguments: { id: 391, title: 'Chase the customer', priority: 'high' } } }],
+            { fetchImpl: spy(sent) },
+        );
+
+        // One call. Naming no column means there is nothing to resolve, and
+        // reading /me and the task to find that out would cost two round trips
+        // on the commonest edit there is.
+        assert.equal(sent.length, 1);
+        assert.deepEqual(sent[0].body, { title: 'Chase the customer', priority: 'high' });
+    });
+
+    it('refuses a column and a status together, because they say the same thing', async () => {
+        const answers = await exchange(
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_update', arguments: { id: 391, column: 'Review', status: 'in_progress' } } }],
+            { fetchImpl: spy([]) },
+        );
+
+        assert.equal(answers[0].result.isError, true);
+        assert.match(answers[0].result.content[0].text, /two vocabularies/);
+    });
+
+    it('refuses a done column however the team spelled it', async () => {
+        const sent = [];
+
+        const answers = await exchange(
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_update', arguments: { id: 391, column: 'Shipped' } } }],
+            { fetchImpl: spy(sent) },
+        );
+
+        // Renaming Done is not a way around the rule, and a model that found
+        // one would believe it had closed its own work.
+        assert.equal(answers[0].result.isError, true);
+        assert.match(answers[0].result.content[0].text, /never close its own work/);
+        assert.ok(!sent.some((call) => call.method === 'PATCH'), 'nothing may be written on the way to that refusal');
+    });
+
+    it('refuses a column a move by status would not actually reach', async () => {
+        const answers = await exchange(
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_update', arguments: { id: 391, column: 'Waiting on customer' } } }],
+            { fetchImpl: spy([]) },
+        );
+
+        // "Waiting on customer" and "In progress" mean the same thing, and the
+        // agent endpoint moves by meaning — so this would land one column over
+        // and report success. A wrong column is worse than a refusal.
+        assert.equal(answers[0].result.isError, true);
+        assert.match(answers[0].result.content[0].text, /would land in "In progress"/);
+    });
+
+    it('says which columns the board has when the column is wrong', async () => {
+        const answers = await exchange(
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_update', arguments: { id: 391, column: 'Blocked' } } }],
+            { fetchImpl: spy([]) },
+        );
+
+        assert.equal(answers[0].result.isError, true);
+        assert.match(answers[0].result.content[0].text, /Waiting on customer/);
+    });
+
+    it('says a task off every board has no columns to move between', async () => {
+        const answers = await exchange(
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_update', arguments: { id: 391, column: 'Review' } } }],
+            { fetchImpl: spy([], { task: { id: 391, work_area_id: null } }) },
+        );
+
+        assert.equal(answers[0].result.isError, true);
+        assert.match(answers[0].result.content[0].text, /not on any board/);
+    });
+
+    it('refuses the key a board prints, and says where the number is', async () => {
+        const sent = [];
+
+        const answers = await exchange(
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_update', arguments: { id: 'MKT-12', title: 'Chase it' } } }],
+            { fetchImpl: spy(sent) },
+        );
+
+        // `/tasks/MKT-12` would be a 404 the model reads as "no such task",
+        // when the task is right there and it addressed it by the one
+        // identifier a person ever sees.
+        assert.equal(answers[0].result.isError, true);
+        assert.match(answers[0].result.content[0].text, /cheto_tasks, cheto_task and cheto_inbox/);
+        assert.equal(sent.length, 0);
+    });
+
+    it('refuses a call with nothing to change', async () => {
+        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_update', arguments: { id: 391 } } }], {
+            fetchImpl: spy([]),
+        });
+
+        assert.equal(answers[0].result.isError, true);
+        assert.match(answers[0].result.content[0].text, /Nothing to change/);
+    });
+
+    it('does not report success when requires_human did not take', async () => {
+        const answers = await exchange(
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_update', arguments: { id: 391, requires_human: true } } }],
+            { fetchImpl: spy([], { patched: { id: 391, requires_human: false } }) },
+        );
+
+        // A 200 with the gate still open is the one answer a model must not
+        // read as "a person is holding this now".
+        assert.equal(answers[0].result.isError, true);
+        assert.match(answers[0].result.content[0].text, /requires_human is still false/);
+    });
+
+    it('is satisfied when it did', async () => {
+        const answers = await exchange(
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_update', arguments: { id: 391, requires_human: true, title: 'Chase it' } } }],
+            { fetchImpl: spy([], { patched: { id: 391, requires_human: true } }) },
+        );
+
+        assert.equal(answers[0].result.isError, undefined);
+    });
+});
+
 describe('the credential decides the surface', () => {
     const human = { CHETO_TOKEN: 'cheto_ut_x' };
 

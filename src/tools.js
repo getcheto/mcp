@@ -129,23 +129,43 @@ export const TOOLS = [
     {
         name: 'cheto_task_update',
         description:
-            'Change what a task says about itself: title, description, type, priority, due date, tags. Saying what a thing IS is allowed; saying it is done is not — status "done" is refused for every agent, always. Use cheto_task_status to move it and cheto_task_assign to hand it over; this is for the text. `tags` REPLACES the whole set — cheto_task_tag adds one without disturbing the others.',
+            'Change one task: what it says about itself — title, description, type, priority, due date, tags, requires_human — and which column it sits in. `column` moves the card, by the name the board shows, and says what `status` says in the board\'s own words, so send one or the other. Saying what a thing IS is allowed; saying it is done is not — status "done", and any column that MEANS done, are refused for every agent, always: move it to review and ask somebody with cheto_review_request. `tags` REPLACES the whole set — cheto_task_tag adds one without disturbing the others.',
         inputSchema: {
             type: 'object',
             properties: {
-                id: { type: 'number' },
+                id: {
+                    type: ['number', 'string'],
+                    description:
+                        'The task\'s number, which cheto_tasks, cheto_task and cheto_inbox all return. A task has no uuid, and the "MKT-12" a board shows is its key, not an id this takes.',
+                },
                 title: { type: 'string' },
                 description: { type: 'string' },
                 type: { type: 'string', enum: ['task', 'feature', 'bug', 'chore', 'epic', 'idea'] },
                 priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },
                 status: { type: 'string', enum: ['inbox', 'ready', 'in_progress', 'review'] },
+                column: {
+                    type: ['string', 'number'],
+                    description:
+                        'Move it to this column of the board it is already on, by name, key or id — cheto_whoami lists every board with its columns. A column of another board is refused rather than moved somewhere nobody asked for, and so is sending this together with `status`.',
+                },
                 tags: { type: 'array', items: { type: 'string' }, description: 'The complete set, replacing whatever is there. At most 12.' },
                 due_on: { type: ['string', 'null'], description: 'YYYY-MM-DD, or null to clear it.' },
-                requires_human: { type: 'boolean' },
+                requires_human: { type: 'boolean', description: 'A person has to look at this before a machine does.' },
             },
             required: ['id'],
         },
-        run: (cheto, { id, ...rest }) => cheto.call(`/tasks/${id}`, { method: 'PATCH', body: rest, idempotencyKey: `mcp-update-${id}-${slug(JSON.stringify(rest))}` }),
+        run: async (cheto, { id, column, ...rest }) => {
+            const task = taskRef(id);
+            const body = { ...rest, ...(await moveFields(cheto, task, column, rest)) };
+
+            if (Object.keys(body).length === 0) {
+                throw new Error('Nothing to change. Besides `id` this needs at least one thing to say: a column, a status, or something the task says about itself.');
+            }
+
+            const answer = await cheto.call(`/tasks/${task}`, { method: 'PATCH', body, idempotencyKey: `mcp-update-${task}-${slug(JSON.stringify(body))}` });
+
+            return confirmApplied(answer, body);
+        },
     },
     {
         name: 'cheto_task_status',
@@ -384,20 +404,9 @@ async function placementFields(cheto, area, column) {
         return { work_area_id: board.id };
     }
 
-    const wanted = String(column).trim().toLowerCase();
-    const match = (board.statuses ?? []).find(
-        (candidate) => String(candidate.name ?? '').toLowerCase() === wanted || String(candidate.key ?? '').toLowerCase() === wanted,
-    );
-
-    if (!match) {
-        throw new Error(
-            `"${board.name}" has no column called "${column}". It has: ${(board.statuses ?? []).map((candidate) => candidate.name).join(', ')}.`,
-        );
-    }
-
     // Only the column: it names its own board, and sending both is two chances
     // to disagree — which the server refuses rather than guesses at.
-    return { work_area_status_id: match.id };
+    return { work_area_status_id: columnOf(board, column).id };
 }
 
 /** One board of this workspace, by name, slug or id. */
@@ -417,6 +426,150 @@ async function areaFor(cheto, area) {
     }
 
     return match;
+}
+
+/**
+ * A task, as the API addresses one: its number.
+ *
+ * Refused in words rather than by the schema, because the two things a model
+ * reaches for instead are both plausible and both wrong. "MKT-12" is the key a
+ * board *prints* on the card — the only identifier a person ever sees — and a
+ * uuid is what every other object in Cheto uses. A task has neither, so the
+ * refusal names what to send and where the number is.
+ */
+function taskRef(id) {
+    const wanted = String(id ?? '').trim();
+
+    if (/^\d+$/.test(wanted)) {
+        return Number(wanted);
+    }
+
+    throw new Error(
+        `"${id}" is not a task id. A task is addressed by its number — the \`id\` that cheto_tasks, cheto_task and cheto_inbox all return — never by the "${wanted || 'MKT-12'}" key a board prints on the card, and never by a uuid, which a task does not have.`,
+    );
+}
+
+/**
+ * A column somebody named, as the fields that move the card there.
+ *
+ * The board is the task's own: `column` moves a card along the board it is
+ * already on, which is the thing a model means by "move it to Waiting on
+ * customer". Putting a task on a *different* board is a different act with
+ * different consequences, and it is not this.
+ *
+ * Both fields go out. `work_area_status_id` is the exact column and is what the
+ * panel sends; `status` is what the column *means*, and is what the agent API
+ * reads today — {@see TaskController::update}, which resolves a status and
+ * ignores the column. The server takes whichever it understands, so the day the
+ * agent endpoint grows the column branch the panel already has, this gets more
+ * precise without changing.
+ */
+async function moveFields(cheto, task, column, rest) {
+    if (isBlank(column)) {
+        return {};
+    }
+
+    if (!isBlank(rest.status)) {
+        throw new Error('`column` and `status` are one instruction in two vocabularies — a column\'s category IS the status — so send one of them. `column` is the board\'s own words; `status` is the five states underneath.');
+    }
+
+    const { data } = await cheto.call(`/tasks/${task}`);
+
+    if (data?.work_area_id === null || data?.work_area_id === undefined) {
+        throw new Error(`Task ${task} is not on any board, so it has no columns to move between. Move it by \`status\` instead, or ask somebody to put it on a board.`);
+    }
+
+    const board = await areaFor(cheto, data.work_area_id);
+    const match = columnOf(board, column);
+    const category = categoryOf(match);
+
+    // The same refusal as `status: done`, in the board's own words. A team that
+    // renamed Done to "Shipped" has not created a way around the rule, and a
+    // model that found one would believe it had closed its own work.
+    if (category === 'done') {
+        throw new Error(
+            `"${match.name}" is a done column of "${board.name}", and an agent may never close its own work — whatever the column is called. Move it to review and ask somebody with cheto_review_request.`,
+        );
+    }
+
+    const landing = landingColumn(board, category);
+
+    // Where a move by status actually lands, worked out the way the server
+    // works it out. With one column per meaning — the ordinary board, and the
+    // renamed one — that is the column asked for and the move is exact. With
+    // two, it is not, and the card would go one column over while this reported
+    // success. A wrong column is worse than a refusal, the same way a wrong
+    // board is. Delete this guard on the day the agent endpoint reads
+    // `work_area_status_id`; until then it is the only thing that makes the
+    // answer true.
+    if (landing && String(landing.id) !== String(match.id)) {
+        throw new Error(
+            `"${board.name}" has more than one column meaning ${category}, and the agent API moves a card by what a column means rather than by which one it is — so this would land in "${landing.name}", not "${match.name}". Refused rather than moved one column over and reported as done. Name "${landing.name}", or ask somebody to drag it.`,
+        );
+    }
+
+    return { work_area_status_id: Number(match.id), status: category };
+}
+
+/** One column of a board, by name, key or id — the three cheto_whoami shows. */
+function columnOf(board, column) {
+    const wanted = String(column).trim().toLowerCase();
+    const columns = board.statuses ?? [];
+
+    const match =
+        columns.find((candidate) => String(candidate.id) === wanted) ??
+        columns.find((candidate) => String(candidate.key ?? '').toLowerCase() === wanted) ??
+        columns.find((candidate) => String(candidate.name ?? '').toLowerCase() === wanted);
+
+    if (!match) {
+        throw new Error(`"${board.name}" has no column called "${column}". It has: ${columns.map((candidate) => candidate.name).join(', ')}.`);
+    }
+
+    return match;
+}
+
+/**
+ * What a column means, as one of the five states.
+ *
+ * `category` arrives as `{value, key}` because the board draws both. A column
+ * nobody renamed carries its meaning in `key` as well, which is what answers
+ * for a payload that predates the pair.
+ */
+function categoryOf(column) {
+    const category = column?.category;
+    const value = typeof category === 'string' ? category : category?.value;
+
+    return String(value ?? column?.key ?? '').toLowerCase();
+}
+
+/** Where a move by status lands: the board's first column of that meaning. */
+function landingColumn(board, category) {
+    return (
+        (board.statuses ?? [])
+            .filter((candidate) => categoryOf(candidate) === category)
+            .sort((one, other) => (one.position ?? 0) - (other.position ?? 0) || (one.id ?? 0) - (other.id ?? 0))[0] ?? null
+    );
+}
+
+/**
+ * That what was asked for actually happened.
+ *
+ * `requires_human` is the field this exists for. The agent endpoint validates
+ * it and then writes it only when a descriptive field travels with it, so
+ * `{id, requires_human: true}` on its own comes back 200 with the gate still
+ * open. Reporting that as success would teach a model that a task is held for a
+ * person when nothing is holding it — which is the one thing the flag is for.
+ */
+function confirmApplied(answer, body) {
+    const task = answer?.data;
+
+    if (!('requires_human' in body) || task?.requires_human === undefined || task.requires_human === Boolean(body.requires_human)) {
+        return answer;
+    }
+
+    throw new Error(
+        `The rest of the change went through, but requires_human is still ${task.requires_human}: this Cheto writes it only alongside a descriptive field. Send it again together with title, description, type, priority, due_on or tags.`,
+    );
 }
 
 function isBlank(value) {
