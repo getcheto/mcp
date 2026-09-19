@@ -13,21 +13,31 @@
  * because a token is the one thing that cannot be argued with.
  *
  * What they cover is the administrative half of Cheto: the boards and their
- * columns, and the agents — creating one, giving it a place to work, saying what
- * it is for and which board its work lands on, arming a machine for it and
- * disarming one. Everything a person does in the panel to set the place up, as
- * against the work that then happens in it.
+ * columns, the work on them, and the agents — creating one, giving it a place to
+ * work, saying what it is for and which board its work lands on, arming a machine
+ * for it and disarming one. Everything a person does in the panel to set the
+ * place up and keep it tidy, as against the work that then happens in it.
  *
  * The job that made it worth building is **importing**: eighty projects from
  * another tracker, each with its own sections, is eighty boards and four hundred
  * columns — a day of clicking in the panel, or a loop from here. Setting up a
  * fleet of agents has the same shape.
  *
- * Two things are deliberately absent, and they are the same two the panel is
- * careful about. **There is no tool to act as an agent**: one credential is one
- * identity, and a person's token writing under an agent's name would make every
- * author line a guess. And **nothing here touches an account** — no passwords,
- * no roles, no invitations, no deletions.
+ * The second job is **triage**, and it could not have gone anywhere else. An
+ * agent may act only on work it created or holds — `TaskPolicy::update` narrows
+ * every one of them to that, deliberately — so reading a backlog somebody else
+ * filled and sorting it is refused on the agent surface by construction.
+ * Curating is acting on work you did not write. That is why editing and removing
+ * a task are here: not because a person is trusted more in general, but because
+ * this particular act has no meaning for a machine identity.
+ *
+ * Two things are still deliberately absent, and they are the same two the panel
+ * is careful about. **There is no tool to act as an agent**: one credential is
+ * one identity, and a person's token writing under an agent's name would make
+ * every author line a guess. And **nothing here touches an account** — no
+ * passwords, no roles, no invitations, no deleting a person. Removing a task is
+ * not that: it is a card off a board, soft-deleted, and something the same
+ * person does in the panel with one click.
  *
  * What a credential may do beyond that is not decided here at all. It is the
  * person's own authority, checked by the same policies the panel uses: an agent
@@ -345,6 +355,72 @@ export const HUMAN_TOOLS = [
             return cheto.call('/tasks', { method: 'POST', body, idempotencyKey: `mcp-task-${slug(String(rest.title ?? ''))}` });
         },
     },
+    {
+        name: 'cheto_task_update',
+        description:
+            'Change a task that is already on a board: what it says about itself — title, description, type, priority, due date, tags, requires_human — and which column it sits in. `column` moves the card by the name the board shows. This is the tool for triage: reading a backlog somebody else filled and sorting it. An agent cannot do that — it may only act on work it created or holds — so a person\'s credential is what this needs, which is the one holding it. `tags` REPLACES the whole set.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                workspace: { type: 'string', description: 'Workspace slug or uuid.' },
+                id: {
+                    type: ['number', 'string'],
+                    description: 'The task\'s number, which cheto_tasks returns as `id`. Not the "TASK-402" key a board prints on the card.',
+                },
+                title: { type: 'string' },
+                description: { type: 'string' },
+                type: { type: 'string', enum: ['task', 'feature', 'bug', 'chore', 'epic', 'idea'] },
+                priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },
+                status: { type: 'string', enum: ['inbox', 'ready', 'in_progress', 'review', 'done'] },
+                column: {
+                    type: ['string', 'number'],
+                    description:
+                        'Move it to this column, by name, key or id. Preferred over `status`: a column names where the card actually goes, while a status leaves the choice to the server. `area` is only needed when two boards of this workspace have a column by the same name.',
+                },
+                area: { type: 'string', description: 'Which board `column` belongs to, when the name alone is ambiguous.' },
+                tags: { type: 'array', items: { type: 'string' }, description: 'The complete set, replacing whatever is there.' },
+                due_on: { type: ['string', 'null'], description: 'YYYY-MM-DD, or null to clear it.' },
+                requires_human: { type: 'boolean' },
+            },
+            required: ['id'],
+        },
+        run: async (cheto, { workspace, id, area, column, ...rest }) => {
+            const named = workspaceFor(cheto, workspace);
+            const task = taskRef(id);
+            const placement = await columnFor(cheto, named, area, column);
+            const body = { ...rest, ...placement };
+
+            if (Object.keys(body).length === 0) {
+                throw new Error('Nothing to change. Besides `id` this needs at least one thing to say: a column, a status, or something the task says about itself.');
+            }
+
+            // The column wins over a status when both arrive, so only one goes
+            // out: two ways of naming the same move is two chances to disagree.
+            if (placement.work_area_status_id !== undefined) {
+                delete body.status;
+            }
+
+            return cheto.call(`/tasks/${task}`, { method: 'PATCH', body, idempotencyKey: `mcp-update-${task}-${slug(JSON.stringify(body))}` });
+        },
+    },
+    {
+        name: 'cheto_task_delete',
+        description:
+            'Take a task off the board for good. The counterpart of triage: a backlog where ideas can only ever be added fills up, and one nobody can clear stops being a backlog. It is a soft delete — the activity trail can still name what it refers to — but it does not come back through this API, so prefer moving a card to a column that means "discarded" when the team has one. Only a person may do this; an agent credential is refused.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                workspace: { type: 'string', description: 'Workspace slug or uuid.' },
+                id: { type: ['number', 'string'], description: 'The task\'s number, as cheto_tasks returns it.' },
+            },
+            required: ['id'],
+        },
+        run: async (cheto, { workspace, id }) => {
+            workspaceFor(cheto, workspace);
+
+            return cheto.call(`/tasks/${taskRef(id)}`, { method: 'DELETE' });
+        },
+    },
 ];
 
 /**
@@ -415,6 +491,82 @@ async function placementIn(cheto, workspace, area, column) {
     // The column alone: it names its own board, and sending both is two chances
     // to disagree — which the server refuses rather than guesses at.
     return { work_area_status_id: match.id };
+}
+
+/**
+ * A task id, and nothing that merely looks like one.
+ *
+ * The "TASK-402" a card prints is its key, not its id, and a model that sends
+ * one gets a sentence saying so rather than a 404 it will retry.
+ */
+function taskRef(id) {
+    const wanted = String(id ?? '').trim();
+
+    if (/^\d+$/.test(wanted)) {
+        return Number(wanted);
+    }
+
+    throw new Error(
+        `"${id}" is not a task id. A task is addressed by its number — the \`id\` cheto_tasks returns — never by the "${wanted || 'TASK-402'}" key a board prints on the card, and never by a uuid, which a task does not have.`,
+    );
+}
+
+/**
+ * The column a move names, as the field the API takes.
+ *
+ * Unlike creating, a move usually does not need to say which board: the card is
+ * already on one, and "Aprobadas pendientes" means a single column in almost
+ * every workspace. So the board is optional here and the name is resolved
+ * across all of them — but an ambiguous name **fails**, naming the boards that
+ * matched, rather than picking the first. Guessing is how three hundred rows
+ * once landed somewhere nobody asked for, and a move is no safer than a create.
+ */
+async function columnFor(cheto, workspace, area, column) {
+    if (isBlank(column)) {
+        return {};
+    }
+
+    const { data: areas = [] } = await cheto.call(`/areas?workspace=${encodeURIComponent(workspace)}`);
+    const wanted = String(column).trim().toLowerCase();
+
+    const boards = isBlank(area)
+        ? areas
+        : areas.filter((candidate) =>
+              [candidate.id, candidate.uuid, candidate.slug, candidate.name].some(
+                  (field) => String(field ?? '').toLowerCase() === String(area).trim().toLowerCase(),
+              ),
+          );
+
+    if (boards.length === 0) {
+        throw new Error(
+            `"${workspace}" has no board called "${area}". It has: ${areas.map((one) => `${one.name} (${one.slug})`).join(', ') || 'none'}.`,
+        );
+    }
+
+    const matches = boards.flatMap((board) =>
+        (board.statuses ?? [])
+            .filter(
+                (one) =>
+                    String(one.id) === wanted ||
+                    String(one.name ?? '').toLowerCase() === wanted ||
+                    String(one.key ?? '').toLowerCase() === wanted,
+            )
+            .map((one) => ({ board, column: one })),
+    );
+
+    if (matches.length === 0) {
+        const columns = boards.flatMap((board) => (board.statuses ?? []).map((one) => `${one.name} (${board.name})`));
+
+        throw new Error(`No column called "${column}" here. There is: ${columns.join(', ') || 'none'}.`);
+    }
+
+    if (matches.length > 1) {
+        throw new Error(
+            `"${column}" is a column on ${matches.length} boards — ${matches.map((one) => one.board.name).join(', ')}. Say which with \`area\`.`,
+        );
+    }
+
+    return { work_area_status_id: matches[0].column.id };
 }
 
 function isBlank(value) {

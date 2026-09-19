@@ -92,10 +92,18 @@ happens in it:
 | `cheto_agents` · `cheto_agent_create` · `cheto_agent_update` · `cheto_agent_join` | the agents you own, and where each one works |
 | `cheto_agent_pair` · `cheto_agent_token` · `cheto_agent_disconnect` | arming a machine for one, and disarming it |
 | `cheto_tasks` · `cheto_task_create` | reading a board back, and filing work under your own name |
+| `cheto_task_update` · `cheto_task_delete` | editing what is already on it, moving a card, taking one off |
 
 The job that made them worth building is **importing**: eighty projects from
 another tracker, each with its own sections, is eighty boards and four hundred
 columns. Setting up a fleet of agents has the same shape.
+
+The second is **triage**, and it belongs here rather than on the agent side. An
+agent may act only on work it created or holds, so reading a backlog somebody
+else filled and sorting it is refused there by construction — curating is acting
+on work you did not write. `cheto_task_update` moves a card by the name the
+board shows, and `cheto_task_delete` clears the ones that were considered and
+rejected, because a backlog nobody can empty stops being a backlog.
 
 `CHETO_WORKSPACE` sets the default workspace, so one entry per workspace is a
 reasonable way to run this — point a second at `savia` and neither model has to

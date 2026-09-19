@@ -731,4 +731,134 @@ describe('the credential decides the surface', () => {
         assert.equal(answers[0].result.isError, true);
         assert.match(answers[0].result.content[0].text, /Marketing & Reels \(marketing-reels\)/);
     });
+
+    // Triage: sorting a backlog somebody else filled. It is the job the agent
+    // surface refuses by construction — an agent may act only on work it
+    // created or holds — so it lives here, on a person's credential, or nowhere.
+    it('moves a card to a column by name without being told which board', async () => {
+        const sent = [];
+
+        await exchange(
+            [
+                {
+                    jsonrpc: '2.0',
+                    id: 1,
+                    method: 'tools/call',
+                    params: { name: 'cheto_task_update', arguments: { workspace: 'appsi', id: 430, column: 'Esperando al cliente' } },
+                },
+            ],
+            {
+                env: human,
+                fetchImpl: async (url, options) => {
+                    sent.push({ url, method: options.method, body: options.body ? JSON.parse(options.body) : null });
+
+                    return { ok: true, status: 200, text: async () => JSON.stringify(url.includes('/areas') ? board : { data: { id: 430 } }) };
+                },
+            },
+        );
+
+        assert.equal(sent.at(-1).url, 'http://cheto.test/api/v1/cli/tasks/430');
+        assert.equal(sent.at(-1).method, 'PATCH');
+        assert.deepEqual(sent.at(-1).body, { work_area_status_id: 64 });
+    });
+
+    it('refuses a column name that two boards share rather than choosing one', async () => {
+        const twoBoards = {
+            data: [
+                board.data[0],
+                { id: 17, uuid: '0199a0de-0000-7000-8000-000000000002', name: 'Soporte', slug: 'soporte', statuses: [{ id: 91, name: 'Esperando al cliente', key: 'waiting' }] },
+            ],
+        };
+
+        const answers = await exchange(
+            [
+                {
+                    jsonrpc: '2.0',
+                    id: 1,
+                    method: 'tools/call',
+                    params: { name: 'cheto_task_update', arguments: { workspace: 'appsi', id: 430, column: 'Esperando al cliente' } },
+                },
+            ],
+            { env: human, fetchImpl: ok(twoBoards) },
+        );
+
+        assert.equal(answers[0].result.isError, true);
+        assert.match(answers[0].result.content[0].text, /Marketing & Reels, Soporte/);
+        assert.match(answers[0].result.content[0].text, /`area`/);
+    });
+
+    it('sends the column alone when a status came with it', async () => {
+        const sent = [];
+
+        await exchange(
+            [
+                {
+                    jsonrpc: '2.0',
+                    id: 1,
+                    method: 'tools/call',
+                    params: { name: 'cheto_task_update', arguments: { workspace: 'appsi', id: 430, column: 'Esperando al cliente', status: 'inbox' } },
+                },
+            ],
+            {
+                env: human,
+                fetchImpl: async (url, options) => {
+                    sent.push({ url, body: options.body ? JSON.parse(options.body) : null });
+
+                    return { ok: true, status: 200, text: async () => JSON.stringify(url.includes('/areas') ? board : { data: { id: 430 } }) };
+                },
+            },
+        );
+
+        // Two vocabularies for one move is two chances to disagree, and the
+        // column is the precise one.
+        assert.deepEqual(sent.at(-1).body, { work_area_status_id: 64 });
+    });
+
+    it('takes a rejected idea off the board', async () => {
+        const sent = [];
+
+        await exchange(
+            [
+                {
+                    jsonrpc: '2.0',
+                    id: 1,
+                    method: 'tools/call',
+                    params: { name: 'cheto_task_delete', arguments: { workspace: 'appsi', id: 430 } },
+                },
+            ],
+            {
+                env: human,
+                fetchImpl: async (url, options) => {
+                    sent.push({ url, method: options.method });
+
+                    return { ok: true, status: 200, text: async () => JSON.stringify({ data: { key: 'TASK-402', deleted: true } }) };
+                },
+            },
+        );
+
+        assert.equal(sent.at(-1).url, 'http://cheto.test/api/v1/cli/tasks/430');
+        assert.equal(sent.at(-1).method, 'DELETE');
+    });
+
+    it('says a board key is not a task id, rather than asking for one that does not exist', async () => {
+        for (const tool of ['cheto_task_update', 'cheto_task_delete']) {
+            const answers = await exchange(
+                [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool, arguments: { workspace: 'appsi', id: 'TASK-402', title: 'x' } } }],
+                { env: human, fetchImpl: ok(board) },
+            );
+
+            assert.equal(answers[0].result.isError, true, tool);
+            assert.match(answers[0].result.content[0].text, /not a task id/, tool);
+        }
+    });
+
+    it('will not send an update that says nothing', async () => {
+        const answers = await exchange(
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_update', arguments: { workspace: 'appsi', id: 430 } } }],
+            { env: human, fetchImpl: ok(board) },
+        );
+
+        assert.equal(answers[0].result.isError, true);
+        assert.match(answers[0].result.content[0].text, /at least one thing to say/);
+    });
 });
