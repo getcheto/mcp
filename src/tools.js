@@ -10,14 +10,44 @@
  * Two things are absent and cannot be added: closing a task, and creating a
  * participant. Both are refused by the server, so exposing them would only
  * teach a model to try.
+ *
+ * Everything else an agent may do depends on its membership's capabilities —
+ * `tasks.create`, `tasks.edit_any`, `tasks.delete`, `boards.manage`,
+ * `channels.post`, `memory.write`, all on by default and switched by the
+ * agent's owner. The tools exist regardless; the server refuses what the
+ * membership lacks, with a 403 that says which. cheto_whoami shows the list up
+ * front so a model does not have to learn it by being refused.
  */
+
+/** The five states a column can mean. */
+const CATEGORY = { type: 'string', enum: ['inbox', 'ready', 'in_progress', 'review', 'done'] };
+
+/** What search can be narrowed to. A list in the schema; a single string is taken too. */
+export const SEARCH_KIND = { type: 'array', items: { type: 'string', enum: ['message', 'task', 'comment', 'compact', 'memory'] } };
+
+/**
+ * The capability list, said in words next to the raw one.
+ *
+ * `membership.capabilities` is the truth; this is so a model reading the
+ * answer once knows what it will be refused before it tries, and reads the one
+ * rule no capability turns off.
+ */
+export const CAPABILITIES = {
+    'tasks.create': 'create tasks',
+    'tasks.edit_any': 'edit, move and assign any task in the workspace (without it: only tasks you created or hold)',
+    'tasks.delete': 'delete tasks',
+    'boards.manage': 'create and change boards and their columns',
+    'channels.post': 'post in channels',
+    'memory.write': 'write, correct and forget workspace memory',
+};
+
 export const TOOLS = [
     {
         name: 'cheto_whoami',
         description:
-            'Who this credential is, which workspace it acts in, who else is there and which boards exist. Call it once at the start: it answers everything needed to begin, so nothing has to be configured in advance. `participants` is how you resolve an @handle without guessing ids; `areas` is every board with its columns, and `membership.area` is your own — where the work you create lands when you do not say.',
+            'Who this credential is, which workspace it acts in, who else is there, which boards exist and what you are allowed to do. Call it once at the start: it answers everything needed to begin, so nothing has to be configured in advance. `what_you_may_do` spells out your capabilities (membership.capabilities) — what is off there is refused, and closing work is refused always. `participants` is how you resolve an @handle without guessing ids; `areas` is every board with its columns, and `membership.area` is your own — where the work you create lands when you do not say.',
         inputSchema: { type: 'object', properties: {} },
-        run: (cheto) => cheto.call('/me'),
+        run: async (cheto) => withCapabilities(await cheto.call('/me')),
     },
     {
         name: 'cheto_inbox',
@@ -98,7 +128,7 @@ export const TOOLS = [
     {
         name: 'cheto_task_create',
         description:
-            'Put a new task on the board. Use type "idea" for something that is not work yet — an idea stops being handed to whoever holds it, which is how you file a thought without it nagging somebody every five minutes. `assignee` offers it to somebody by @handle; they still have to accept.',
+            'Put a new task on the board (capability tasks.create). Use type "idea" for something that is not work yet — an idea stops being handed to whoever holds it, which is how you file a thought without it nagging somebody every five minutes. `assignee` offers it to somebody by @handle; they still have to accept.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -133,7 +163,7 @@ export const TOOLS = [
     {
         name: 'cheto_task_update',
         description:
-            'Change one task: what it says about itself — title, description, type, priority, due date, tags, requires_human — and which column it sits in. `column` moves the card, by the name the board shows, and says what `status` says in the board\'s own words, so send one or the other. Saying what a thing IS is allowed; saying it is done is not — status "done", and any column that MEANS done, are refused for every agent, always: move it to review and ask somebody with cheto_review_request. `tags` REPLACES the whole set — cheto_task_tag adds one without disturbing the others.',
+            'Change one task: what it says about itself — title, description, type, priority, due date (`due_on`, which is how work is scheduled), tags, requires_human — and which column it sits in. A task you neither created nor hold needs the tasks.edit_any capability (cheto_whoami lists yours). `column` moves the card, by the name the board shows, and says what `status` says in the board\'s own words, so send one or the other. Saying what a thing IS is allowed; saying it is done is not — status "done", and any column that MEANS done, are refused for every agent, always: move it to review and ask somebody with cheto_review_request. `tags` REPLACES the whole set — cheto_task_tag adds one without disturbing the others.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -188,7 +218,7 @@ export const TOOLS = [
     {
         name: 'cheto_task_assign',
         description:
-            'Hand a task to somebody — a person or another agent — by @handle, or take it off whoever holds it with `to: null`. Assigning is an OFFER, not an instruction: the other side still has to accept, and nothing starts on their machine because of this. To take unheld work for yourself use cheto_task_claim, which also starts it.',
+            'Hand a task to somebody — a person or another agent — by @handle, or take it off whoever holds it with `to: null`. Reassigning work you neither created nor hold needs the tasks.edit_any capability. Assigning is an OFFER, not an instruction: the other side still has to accept, and nothing starts on their machine because of this. To take unheld work for yourself use cheto_task_claim, which also starts it.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -312,36 +342,199 @@ export const TOOLS = [
     },
     {
         name: 'cheto_channel_post',
-        description: 'Say something in a channel. Write @handle to name somebody — people and agents alike, resolved server-side.',
+        description: 'Say something in a channel (capability channels.post). Write @handle to name somebody — people and agents alike, resolved server-side.',
         inputSchema: { type: 'object', properties: { channel: { type: 'string' }, body: { type: 'string' } }, required: ['channel', 'body'] },
         run: (cheto, { channel, body }) =>
             cheto.call(`/channels/${encodeURIComponent(channel)}/messages`, { method: 'POST', body: { body }, idempotencyKey: `mcp-post-${channel}-${slug(body)}` }),
     },
     {
         name: 'cheto_search',
-        description: 'Reach past the bounded read, into everything that was said before it. Use it instead of asking for a bigger window.',
+        description: 'Reach past the bounded read, into everything that was said before it — messages, tasks, comments, folded summaries and memory. Use it instead of asking for a bigger window.',
         inputSchema: {
             type: 'object',
-            properties: { q: { type: 'string' }, kind: { type: 'string', enum: ['message', 'task', 'comment', 'compact'] } },
+            properties: {
+                q: { type: 'string', description: 'At least two characters.' },
+                kind: { ...SEARCH_KIND, description: 'Only these kinds. One, or a list.' },
+                limit: { type: 'number', minimum: 1, maximum: 50 },
+            },
             required: ['q'],
         },
-        run: (cheto, { q, kind }) => cheto.call(`/search?q=${encodeURIComponent(q)}${kind ? `&kind=${kind}` : ''}`),
+        run: (cheto, { q, kind, limit }) => cheto.call(`/search?${searchQuery({ q, kind, limit })}`),
     },
     {
         name: 'cheto_memory',
-        description: 'What this workspace worked out, as against what it said. Read it before asking somebody a question they have already answered.',
-        inputSchema: { type: 'object', properties: {} },
-        run: (cheto) => cheto.call('/memory'),
+        description: 'What this workspace worked out, as against what it said. Read it before asking somebody a question they have already answered. Each entry has an `id`, which cheto_memory_update and cheto_memory_forget take.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                key: { type: 'string', description: 'Only the entry filed under this key.' },
+                q: { type: 'string', description: 'Only entries whose title or body contains this.' },
+                limit: { type: 'number', minimum: 1, maximum: 100 },
+            },
+        },
+        run: (cheto, args = {}) => cheto.call(`/memory${queryOf(args)}`),
     },
     {
         name: 'cheto_memory_write',
-        description: 'Write something down for everybody, so it is not rediscovered next week. `key` makes it addressable by name later.',
+        description: 'Write something down for everybody, so it is not rediscovered next week (capability memory.write). `key` makes it addressable by name later.',
         inputSchema: {
             type: 'object',
             properties: { title: { type: 'string' }, body: { type: 'string' }, key: { type: 'string' } },
             required: ['title', 'body'],
         },
         run: (cheto, args) => cheto.call('/memory', { method: 'POST', body: args, idempotencyKey: `mcp-memory-${slug(args.key ?? args.title)}` }),
+    },
+    {
+        name: 'cheto_memory_update',
+        description: 'Correct something written down earlier: its title, body or key. Changes only what you send (capability memory.write). The id comes from cheto_memory.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                id: { type: 'number' },
+                title: { type: 'string' },
+                body: { type: 'string' },
+                key: { type: ['string', 'null'], description: 'null takes the key off.' },
+            },
+            required: ['id'],
+        },
+        run: (cheto, { id, ...rest }) => {
+            if (Object.keys(rest).length === 0) {
+                throw new Error('Nothing to change. Send a title, a body or a key along with `id`.');
+            }
+
+            return cheto.call(`/memory/${Number(id)}`, { method: 'PATCH', body: rest });
+        },
+    },
+    {
+        name: 'cheto_memory_forget',
+        description: 'Take an entry out of the workspace memory, when it has become wrong rather than merely old (capability memory.write). Prefer cheto_memory_update when it only needs correcting.',
+        inputSchema: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'] },
+        run: (cheto, { id }) => cheto.call(`/memory/${Number(id)}`, { method: 'DELETE' }),
+    },
+    {
+        name: 'cheto_task_delete',
+        description:
+            'Take a task off the board (capability tasks.delete). A soft delete — the activity trail can still name it — but it does not come back through this API, so prefer moving the card to a column that means "discarded" when the board has one. Deleting is not closing: finished work goes to review, never here.',
+        inputSchema: {
+            type: 'object',
+            properties: { id: { type: ['number', 'string'], description: 'The task\'s number, as cheto_tasks returns it. Not the key a card prints.' } },
+            required: ['id'],
+        },
+        run: (cheto, { id }) => cheto.call(`/tasks/${taskRef(id)}`, { method: 'DELETE' }),
+    },
+    {
+        name: 'cheto_area_create',
+        description:
+            'Create a board in this workspace, with its own columns (capability boards.manage). Call cheto_whoami first: a board with that name may already exist. Each column needs `category` — one of inbox, ready, in_progress, review, done — because the words are the team\'s but the meaning is what every rule reads. Omit `columns` for the five defaults.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                name: { type: 'string' },
+                description: { type: 'string' },
+                color: { type: 'string' },
+                icon: { type: 'string' },
+                columns: {
+                    type: 'array',
+                    description: 'Left to right.',
+                    items: {
+                        type: 'object',
+                        properties: { name: { type: 'string' }, category: CATEGORY, color: { type: 'string' } },
+                        required: ['name', 'category'],
+                    },
+                },
+            },
+            required: ['name'],
+        },
+        run: (cheto, args) => cheto.call('/areas', { method: 'POST', body: args, idempotencyKey: `mcp-area-${slug(args.name)}` }),
+    },
+    {
+        name: 'cheto_area_update',
+        description: 'Rename a board or change what it says about itself (capability boards.manage). The board by name, slug, uuid or id — cheto_whoami lists them.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                area: { type: 'string' },
+                name: { type: 'string' },
+                description: { type: 'string' },
+                color: { type: 'string' },
+                icon: { type: 'string' },
+            },
+            required: ['area'],
+        },
+        run: async (cheto, { area, ...rest }) => cheto.call(`/areas/${(await boardRef(cheto, area)).id}`, { method: 'PATCH', body: rest }),
+    },
+    {
+        name: 'cheto_column_add',
+        description:
+            'Add a column to a board (capability boards.manage). `category` is required and says which of the five states it means: the rule that stops an agent closing work reads the category, not the word.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                area: { type: 'string', description: 'Board name, slug, uuid or id.' },
+                name: { type: 'string' },
+                category: CATEGORY,
+                color: { type: 'string' },
+            },
+            required: ['area', 'name', 'category'],
+        },
+        run: async (cheto, { area, ...rest }) => cheto.call(`/areas/${(await boardRef(cheto, area)).id}/columns`, { method: 'POST', body: rest }),
+    },
+    {
+        name: 'cheto_column_update',
+        description:
+            'Rename a column, or change what it means (capability boards.manage). Changing `category` moves every task in it, because the category IS the task\'s state. An empty name puts a default column back to being drawn in the reader\'s own language.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                area: { type: 'string', description: 'Board name, slug, uuid or id.' },
+                column: { type: ['string', 'number'], description: 'Column by name, key or id.' },
+                name: { type: 'string' },
+                category: CATEGORY,
+                color: { type: 'string' },
+            },
+            required: ['area', 'column'],
+        },
+        run: async (cheto, { area, column, ...rest }) => {
+            const board = await boardRef(cheto, area);
+
+            return cheto.call(`/areas/${board.id}/columns/${columnId(board, column)}`, { method: 'PATCH', body: rest });
+        },
+    },
+    {
+        name: 'cheto_columns_reorder',
+        description: 'Put the columns of a board in this order, left to right (capability boards.manage). Columns you leave out keep the positions they had.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                area: { type: 'string', description: 'Board name, slug, uuid or id.' },
+                order: { type: 'array', items: { type: ['string', 'number'] }, description: 'Columns by name, key or id, in the order they should appear.' },
+            },
+            required: ['area', 'order'],
+        },
+        run: async (cheto, { area, order }) => {
+            const board = await boardRef(cheto, area);
+
+            return cheto.call(`/areas/${board.id}/columns`, { method: 'PUT', body: { order: [].concat(order).map((one) => columnId(board, one)) } });
+        },
+    },
+    {
+        name: 'cheto_column_remove',
+        description:
+            'Remove a column and move its work into another one of the same board (capability boards.manage). `into` is required: work never disappears off a board or moves somewhere nobody was told about. A board cannot lose its last column.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                area: { type: 'string', description: 'Board name, slug, uuid or id.' },
+                column: { type: ['string', 'number'], description: 'The column to remove, by name, key or id.' },
+                into: { type: ['string', 'number'], description: 'The column its tasks go to, by name, key or id.' },
+            },
+            required: ['area', 'column', 'into'],
+        },
+        run: async (cheto, { area, column, into }) => {
+            const board = await boardRef(cheto, area);
+
+            return cheto.call(`/areas/${board.id}/columns/${columnId(board, column)}`, { method: 'DELETE', body: { into: columnId(board, into) } });
+        },
     },
     {
         name: 'cheto_heartbeat',
@@ -351,6 +544,101 @@ export const TOOLS = [
         run: (cheto, { status }) => cheto.call('/heartbeat', { method: 'POST', body: status ? { status } : {} }),
     },
 ];
+
+
+/**
+ * A search as the query string the server reads: `kind[]` repeated, because
+ * the server validates it as a list and a bare `kind=message` is a 422.
+ */
+export function searchQuery({ q, kind, limit, workspace }) {
+    const query = new URLSearchParams();
+
+    if (workspace) {
+        query.set('workspace', workspace);
+    }
+
+    query.set('q', String(q ?? ''));
+
+    for (const one of kind === undefined || kind === null ? [] : [].concat(kind)) {
+        query.append('kind[]', String(one));
+    }
+
+    if (limit !== undefined && limit !== null) {
+        query.set('limit', String(limit));
+    }
+
+    return query.toString();
+}
+
+/** Optional filters as a query string, leaving out what was not given. */
+function queryOf(args) {
+    const query = new URLSearchParams();
+
+    for (const [key, value] of Object.entries(args ?? {})) {
+        if (!isBlank(value)) {
+            query.set(key, String(value));
+        }
+    }
+
+    return query.toString() ? `?${query}` : '';
+}
+
+
+function withCapabilities(answer) {
+    const granted = answer?.membership?.capabilities;
+
+    if (!Array.isArray(granted)) {
+        return answer;
+    }
+
+    const allowed = Object.keys(CAPABILITIES).filter((one) => granted.includes(one));
+    const refused = Object.keys(CAPABILITIES).filter((one) => !granted.includes(one));
+
+    return {
+        what_you_may_do: {
+            capabilities: granted,
+            allowed: allowed.map((one) => `${one}: ${CAPABILITIES[one]}`),
+            not_allowed: refused.map((one) => `${one}: ${CAPABILITIES[one]}`),
+            never: 'Closing work. Status done, or any column meaning done, is refused for every agent: move it to review and ask somebody with cheto_review_request.',
+            changed_by: 'The agent\'s owner, in the panel or with cheto_agent_update. Not by the agent.',
+        },
+        ...answer,
+    };
+}
+
+/**
+ * A board for the tools that change one, by name, slug, uuid or id.
+ *
+ * Resolved against cheto_whoami's list like every other board here. A board
+ * that is not on it — archived, say — can still be named by id or uuid, and
+ * the server decides; a name that matches nothing fails with the list.
+ */
+async function boardRef(cheto, area) {
+    try {
+        return await areaFor(cheto, area);
+    } catch (error) {
+        const raw = String(area ?? '').trim();
+
+        if (/^\d+$/.test(raw) || /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(raw)) {
+            return { id: raw, name: raw, statuses: null };
+        }
+
+        throw error;
+    }
+}
+
+/** A column of a board as the id the API takes, by name, key or id. */
+function columnId(board, column) {
+    if (board.statuses === null) {
+        if (/^\d+$/.test(String(column).trim())) {
+            return Number(column);
+        }
+
+        throw new Error(`Board ${board.id} is not in cheto_whoami's list, so its columns can only be named by id here.`);
+    }
+
+    return Number(columnOf(board, column).id);
+}
 
 /** A stable key from what the work is, so a retry is a retry and not a second write. */
 function slug(value) {
@@ -426,6 +714,7 @@ async function areaFor(cheto, area) {
 
     const match =
         areas.find((candidate) => String(candidate.id) === wanted) ??
+        areas.find((candidate) => String(candidate.uuid ?? '').toLowerCase() === wanted) ??
         areas.find((candidate) => String(candidate.slug ?? '').toLowerCase() === wanted) ??
         areas.find((candidate) => String(candidate.name ?? '').toLowerCase() === wanted);
 

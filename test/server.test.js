@@ -541,7 +541,7 @@ describe('the credential decides the surface', () => {
         ],
     };
 
-    it('offers a person the tools that shape a board, and an agent none of them', async () => {
+    it('offers both a person and an agent the board tools, and a person their own inbox', async () => {
         const asHuman = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }], { env: human });
         const asAgent = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }]);
 
@@ -550,16 +550,19 @@ describe('the credential decides the surface', () => {
         assert.ok(names(asHuman).includes('cheto_area_create'));
         assert.ok(names(asHuman).includes('cheto_column_add'));
 
-        // The wall, in the one place a model could have walked through it: an
-        // agent credential is never handed a tool that redraws the room.
-        assert.ok(!names(asAgent).includes('cheto_area_create'));
-        assert.ok(!names(asAgent).includes('cheto_column_add'));
+        // An agent reshapes a board when its membership has boards.manage; the
+        // server refuses it otherwise. The tool is offered either way, under
+        // its plain name, because an agent token is one agent.
+        assert.ok(names(asAgent).includes('cheto_area_create'));
+        assert.ok(names(asAgent).includes('cheto_column_add'));
 
-        // A person has no inbox of their own. The one a person's credential is
-        // offered is an agent's, and it cannot be called without naming which.
+        // A person has an inbox of their own now; the agent's is the twin, and
+        // it cannot be called without naming which agent.
         assert.ok(names(asAgent).includes('cheto_inbox'));
-        const inbox = asHuman[0].result.tools.find((tool) => tool.name === 'cheto_inbox');
-        assert.ok(inbox.inputSchema.required.includes('agent'));
+        const own = asHuman[0].result.tools.find((tool) => tool.name === 'cheto_inbox');
+        assert.equal(own.inputSchema.properties.agent, undefined);
+        const twin = asHuman[0].result.tools.find((tool) => tool.name === 'cheto_agent_inbox');
+        assert.ok(twin.inputSchema.required.includes('agent'));
     });
 
     it('talks to the human half of the API, not the agent half', async () => {
@@ -902,12 +905,12 @@ describe('one person\'s token, a team of agents', () => {
             assert.ok(names.includes(name), `expected the person's ${name}`);
         }
 
-        for (const name of ['cheto_inbox', 'cheto_task_comment', 'cheto_agent_whoami', 'cheto_agent_tasks', 'cheto_agent_task_create', 'cheto_agent_task_update']) {
+        for (const name of ['cheto_agent_inbox', 'cheto_agent_task_comment', 'cheto_task_claim', 'cheto_agent_whoami', 'cheto_agent_tasks', 'cheto_agent_task_create', 'cheto_agent_task_update']) {
             assert.ok(names.includes(name), `expected the agent's ${name}`);
         }
 
         // Every tool that acts as an agent requires saying which.
-        for (const tool of tools.filter((one) => ['cheto_inbox', 'cheto_task_comment', 'cheto_agent_whoami', 'cheto_agent_task_create'].includes(one.name))) {
+        for (const tool of tools.filter((one) => ['cheto_agent_inbox', 'cheto_agent_task_comment', 'cheto_task_claim', 'cheto_agent_whoami', 'cheto_agent_task_create'].includes(one.name))) {
             assert.ok(tool.inputSchema.required.includes('agent'), `${tool.name} must require agent`);
             assert.equal(tool.inputSchema.properties.agent.type, 'string');
             assert.ok(tool.inputSchema.properties.workspace);
@@ -921,7 +924,7 @@ describe('one person\'s token, a team of agents', () => {
         const sent = [];
 
         const answers = await exchange(
-            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_comment', arguments: { agent: 'magui.x1y2@cheto', id: 7, body: 'Done, see PR' } } }],
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_agent_task_comment', arguments: { agent: 'magui.x1y2@cheto', id: 7, body: 'Done, see PR' } } }],
             { env: human, fetchImpl: recording(sent) },
         );
 
@@ -956,7 +959,7 @@ describe('one person\'s token, a team of agents', () => {
     it('defaults the workspace to the one the server was started for', async () => {
         const sent = [];
 
-        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_inbox', arguments: { agent: 'magui' } } }], {
+        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_agent_inbox', arguments: { agent: 'magui' } } }], {
             env: { ...human, CHETO_WORKSPACE: 'savia' },
             fetchImpl: recording(sent, { summary: { has_work: false } }),
         });
@@ -980,7 +983,7 @@ describe('one person\'s token, a team of agents', () => {
     it('refuses an agent tool with no agent, and sends nothing', async () => {
         const sent = [];
 
-        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_comment', arguments: { id: 7, body: 'hi' } } }], {
+        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_agent_task_comment', arguments: { id: 7, body: 'hi' } } }], {
             env: human,
             fetchImpl: recording(sent),
         });
@@ -1041,7 +1044,7 @@ describe('one person\'s token, a team of agents', () => {
     });
 
     it('says a dead person\'s credential needs `cheto login`, and a dead agent\'s a new pairing', async () => {
-        const asPerson = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_inbox', arguments: { agent: '@magui' } } }], {
+        const asPerson = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_agent_inbox', arguments: { agent: '@magui' } } }], {
             env: human,
             fetchImpl: ok({ message: 'Unauthenticated.' }, 401),
         });
@@ -1065,7 +1068,7 @@ describe('one person\'s token, a team of agents', () => {
 
     for (const [status, code, pattern] of refusals) {
         it(`explains ${code} with the server's own words, and not as a dead credential`, async () => {
-            const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_inbox', arguments: { agent: '@magui' } } }], {
+            const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_agent_inbox', arguments: { agent: '@magui' } } }], {
                 env: human,
                 fetchImpl: ok({ message: `Server says ${code}.`, error: code }, status),
             });
@@ -1078,4 +1081,262 @@ describe('one person\'s token, a team of agents', () => {
             assert.doesNotMatch(text, /no longer valid/);
         });
     }
+});
+
+describe('the whole system, as a person and as every agent', () => {
+    const human = { CHETO_TOKEN: 'cheto_ut_secret' };
+    const call = (name, args) => ({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
+
+    const me = {
+        user: { id: 1, name: 'Manuel' },
+        membership: { id: 6, handle: 'magui', capabilities: ['tasks.create', 'channels.post'] },
+        areas: [
+            {
+                id: 16,
+                uuid: '0199a0de-0000-7000-8000-000000000001',
+                name: 'Marketing & Reels',
+                slug: 'marketing-reels',
+                statuses: [
+                    { id: 5, name: 'Ideas', key: 'inbox', category: 'inbox' },
+                    { id: 64, name: 'Blocked', key: 'blocked', category: 'in_progress' },
+                ],
+            },
+        ],
+        participants: [],
+    };
+
+    const agents = {
+        data: [{ id: 3, name: 'Magui', slug: 'magui', address: 'magui.x1y2@cheto', memberships: [{ id: 6, handle: 'magui', workspace: { id: 1, uuid: 'w-uuid', slug: 'appsi' } }] }],
+    };
+
+    const channels = { data: [{ id: 12, name: 'General', slug: 'general' }] };
+
+    /** Answers the lookups by path, and records every request. */
+    const server = (sent) => async (url, options) => {
+        sent.push({ url, method: options.method ?? 'GET', headers: options.headers, body: options.body ? JSON.parse(options.body) : null });
+        const path = new URL(url).pathname;
+        const body = path.endsWith('/me') ? me : path.endsWith('/agents') ? agents : path.endsWith('/channels') ? channels : { data: { id: 1 } };
+
+        return { ok: true, status: 200, text: async () => JSON.stringify(body) };
+    };
+
+    const run = async (name, args, env = human) => {
+        const sent = [];
+        const answers = await exchange([call(name, args)], { env, fetchImpl: server(sent) });
+
+        return { sent, answer: answers[0].result };
+    };
+
+    const personCalls = [
+        ['cheto_task', { id: 7 }, 'GET', '/cli/tasks/7', null],
+        ['cheto_task_comment', { id: 7, body: 'hi' }, 'POST', '/cli/tasks/7/comments', { body: 'hi' }],
+        ['cheto_inbox', {}, 'GET', '/cli/inbox', null],
+        ['cheto_inbox', { workspace: 'appsi' }, 'GET', '/cli/inbox?workspace=appsi', null],
+        ['cheto_reviews', { workspace: 'appsi' }, 'GET', '/cli/reviews?workspace=appsi', null],
+        [
+            'cheto_review_request',
+            { task_id: 7, reviewer_type: 'user', reviewer_id: 9, note: 'please' },
+            'POST',
+            '/cli/tasks/7/reviews',
+            { reviewer_type: 'user', reviewer_id: 9, note: 'please' },
+        ],
+        ['cheto_review_answer', { id: 4, status: 'approved' }, 'PATCH', '/cli/reviews/4', { status: 'approved' }],
+        ['cheto_channels', { workspace: 'appsi' }, 'GET', '/cli/channels?workspace=appsi', null],
+        ['cheto_channel_read', { channel: 12 }, 'GET', '/cli/channels/12/context', null],
+        ['cheto_channel_post', { channel: 12, body: 'hola' }, 'POST', '/cli/channels/12/messages', { body: 'hola' }],
+        ['cheto_memory', { workspace: 'appsi', q: 'deploy' }, 'GET', '/cli/memory?workspace=appsi&q=deploy', null],
+        ['cheto_memory_write', { workspace: 'appsi', title: 'T', body: 'B' }, 'POST', '/cli/memory', { workspace: 'appsi', title: 'T', body: 'B' }],
+        ['cheto_memory_update', { id: 5, body: 'B2' }, 'PATCH', '/cli/memory/5', { body: 'B2' }],
+        ['cheto_memory_forget', { id: 5 }, 'DELETE', '/cli/memory/5', null],
+        ['cheto_search', { workspace: 'appsi', q: 'deploy', kind: ['task', 'memory'] }, 'GET', '/cli/search?workspace=appsi&q=deploy&kind%5B%5D=task&kind%5B%5D=memory', null],
+        [
+            'cheto_task_update',
+            { workspace: 'appsi', id: 430, due_on: '2026-10-01', assignee_type: 'user', assignee_id: 9 },
+            'PATCH',
+            '/cli/tasks/430',
+            { due_on: '2026-10-01', assignee_type: 'user', assignee_id: 9 },
+        ],
+        ['cheto_agent_update', { agent: 3, workspace: 'appsi', capabilities: ['tasks.create', 'memory.write'] }, 'PATCH', '/cli/agents/3', { workspace: 'appsi', capabilities: ['tasks.create', 'memory.write'] }],
+        ['cheto_agent_update', { agent: 3, workspace: 'appsi', capabilities: null }, 'PATCH', '/cli/agents/3', { workspace: 'appsi', capabilities: null }],
+    ];
+
+    for (const [name, args, method, path, body] of personCalls) {
+        it(`${name} ${JSON.stringify(args)} is ${method} ${path} as the person`, async () => {
+            const { sent, answer } = await run(name, args);
+
+            assert.equal(answer.isError, undefined, answer.content?.[0]?.text);
+            assert.equal(sent.at(-1).method, method);
+            assert.equal(sent.at(-1).url, `http://cheto.test/api/v1${path}`);
+            assert.deepEqual(sent.at(-1).body, body);
+            assert.equal(sent.at(-1).headers['X-Cheto-Agent'], undefined, 'a person\'s tool never names an agent');
+        });
+    }
+
+    it('fills a missing workspace from CHETO_WORKSPACE, including for an agent\'s capabilities', async () => {
+        const { sent } = await run('cheto_agent_update', { agent: 3, capabilities: ['tasks.create'] }, { ...human, CHETO_WORKSPACE: 'savia' });
+
+        assert.deepEqual(sent.at(-1).body, { workspace: 'savia', capabilities: ['tasks.create'] });
+    });
+
+    it('finds a channel by name inside the workspace, never by a bare slug', async () => {
+        const { sent } = await run('cheto_channel_post', { workspace: 'appsi', channel: '#general', body: 'hola' });
+
+        assert.equal(sent[0].url, 'http://cheto.test/api/v1/cli/channels?workspace=appsi');
+        assert.equal(sent.at(-1).url, 'http://cheto.test/api/v1/cli/channels/12/messages');
+    });
+
+    it('assigns to "me", to one of the person\'s agents by handle, and to nobody', async () => {
+        const toMe = await run('cheto_task_update', { workspace: 'appsi', id: 430, assignee: 'me' });
+        const toAgent = await run('cheto_task_update', { workspace: 'appsi', id: 430, assignee: '@magui' });
+        const toNobody = await run('cheto_task_update', { workspace: 'appsi', id: 430, assignee: null });
+
+        assert.deepEqual(toMe.sent.at(-1).body, { assignee_type: 'user', assignee_id: 1 });
+        assert.deepEqual(toAgent.sent.at(-1).body, { assignee_type: 'agent', assignee_id: 3 });
+        assert.deepEqual(toNobody.sent.at(-1).body, { assignee_type: null, assignee_id: null });
+        assert.equal(toNobody.sent.length, 1, 'unassigning looks nobody up');
+    });
+
+    it('says how to name somebody who is not the person or their agent', async () => {
+        const { answer, sent } = await run('cheto_task_update', { workspace: 'appsi', id: 430, assignee: '@stranger' });
+
+        assert.equal(answer.isError, true);
+        assert.match(answer.content[0].text, /assignee_type and assignee_id/);
+        assert.ok(!sent.some((one) => one.method === 'PATCH'));
+    });
+
+    it('asks a review of an agent by handle', async () => {
+        const { sent } = await run('cheto_review_request', { workspace: 'appsi', task_id: 7, reviewer: '@magui' });
+
+        assert.deepEqual(sent.at(-1).body, { reviewer_type: 'agent', reviewer_id: 3 });
+    });
+
+    const agentCalls = [
+        ['cheto_task_delete', { id: 7 }, 'DELETE', '/agent/tasks/7', null],
+        ['cheto_area_create', { name: 'Soporte', columns: [{ name: 'Nuevo', category: 'inbox' }] }, 'POST', '/agent/areas', { name: 'Soporte', columns: [{ name: 'Nuevo', category: 'inbox' }] }],
+        ['cheto_area_update', { area: 'Marketing & Reels', name: 'Reels' }, 'PATCH', '/agent/areas/16', { name: 'Reels' }],
+        ['cheto_column_add', { area: 'marketing-reels', name: 'Waiting', category: 'review' }, 'POST', '/agent/areas/16/columns', { name: 'Waiting', category: 'review' }],
+        ['cheto_column_update', { area: 16, column: 'Blocked', name: 'Stuck' }, 'PATCH', '/agent/areas/16/columns/64', { name: 'Stuck' }],
+        ['cheto_columns_reorder', { area: '16', order: ['Blocked', 'Ideas'] }, 'PUT', '/agent/areas/16/columns', { order: [64, 5] }],
+        ['cheto_column_remove', { area: 'Marketing & Reels', column: 'Blocked', into: 'Ideas' }, 'DELETE', '/agent/areas/16/columns/64', { into: 5 }],
+        ['cheto_memory_update', { id: 5, title: 'T2' }, 'PATCH', '/agent/memory/5', { title: 'T2' }],
+        ['cheto_memory_forget', { id: 5 }, 'DELETE', '/agent/memory/5', null],
+    ];
+
+    for (const [name, args, method, path, body] of agentCalls) {
+        it(`${name} is ${method} ${path} on an agent token, and ${name.replace(/^cheto_/, 'cheto_agent_')} on a person's`, async () => {
+            const asAgent = await run(name, args, {});
+
+            assert.equal(asAgent.answer.isError, undefined, asAgent.answer.content?.[0]?.text);
+            assert.equal(asAgent.sent.at(-1).method, method);
+            assert.equal(asAgent.sent.at(-1).url, `http://cheto.test/api/v1${path}`);
+            assert.deepEqual(asAgent.sent.at(-1).body, body);
+            assert.equal(asAgent.sent.at(-1).headers['X-Cheto-Agent'], undefined);
+
+            const renamed = name.replace(/^cheto_/, 'cheto_agent_');
+            const asPerson = await run(renamed, { agent: '@magui', ...args });
+
+            assert.equal(asPerson.answer.isError, undefined, asPerson.answer.content?.[0]?.text);
+            assert.equal(asPerson.sent.at(-1).method, method);
+            assert.equal(asPerson.sent.at(-1).url, `http://cheto.test/api/v1${path}`);
+            assert.deepEqual(asPerson.sent.at(-1).body, body);
+            assert.equal(asPerson.sent.at(-1).headers['X-Cheto-Agent'], '@magui');
+            assert.equal(asPerson.sent.at(-1).headers.Authorization, 'Bearer cheto_ut_secret');
+        });
+    }
+
+    it('refuses the person\'s board tool when handed an agent, naming the agent\'s', async () => {
+        const { answer, sent } = await run('cheto_column_add', { agent: '@magui', area: '16', name: 'x', category: 'inbox' });
+
+        assert.equal(answer.isError, true);
+        assert.match(answer.content[0].text, /cheto_agent_column_add/);
+        assert.equal(sent.length, 0);
+    });
+
+    it('offers no name twice in person mode, and every shared tool as both', async () => {
+        const tools = (await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }], { env: human }))[0].result.tools;
+        const names = tools.map((tool) => tool.name);
+
+        assert.equal(new Set(names).size, names.length);
+
+        for (const name of ['cheto_task', 'cheto_task_comment', 'cheto_inbox', 'cheto_reviews', 'cheto_review_request', 'cheto_review_answer', 'cheto_channels', 'cheto_channel_read', 'cheto_channel_post', 'cheto_memory', 'cheto_memory_write', 'cheto_memory_update', 'cheto_memory_forget', 'cheto_search', 'cheto_task_delete', 'cheto_area_create', 'cheto_column_remove']) {
+            const person = tools.find((tool) => tool.name === name);
+            const agent = tools.find((tool) => tool.name === name.replace(/^cheto_/, 'cheto_agent_'));
+
+            assert.ok(person, `expected the person's ${name}`);
+            assert.equal(person.inputSchema.properties.agent, undefined, `${name} must not take agent`);
+            assert.ok(agent?.inputSchema.required.includes('agent'), `expected the agent's twin of ${name}, requiring agent`);
+        }
+
+        // Every agent tool is reachable in person mode, under one name or the other.
+        for (const tool of TOOLS) {
+            const reachable = tools.find((one) => (one.name === tool.name || one.name === tool.name.replace(/^cheto_/, 'cheto_agent_')) && one.inputSchema.required?.includes('agent'));
+
+            assert.ok(reachable, `${tool.name} has no agent variant in person mode`);
+        }
+    });
+
+    it('spells out an agent\'s capabilities in whoami, and that closing is never one', async () => {
+        const asAgent = JSON.parse((await run('cheto_whoami', {}, {})).answer.content[0].text);
+        const asPerson = JSON.parse((await run('cheto_agent_whoami', { agent: '@magui' })).answer.content[0].text);
+
+        for (const result of [asAgent, asPerson]) {
+            assert.deepEqual(result.what_you_may_do.capabilities, ['tasks.create', 'channels.post']);
+            assert.ok(result.what_you_may_do.allowed.some((line) => line.startsWith('tasks.create')));
+            assert.ok(result.what_you_may_do.not_allowed.some((line) => line.startsWith('tasks.delete')));
+            assert.ok(result.what_you_may_do.not_allowed.some((line) => line.startsWith('boards.manage')));
+            assert.match(result.what_you_may_do.never, /done/);
+            assert.deepEqual(result.membership, me.membership, 'the raw answer stays');
+        }
+    });
+
+    it('sends an agent\'s search kinds as the list the server validates', async () => {
+        const { sent } = await run('cheto_search', { q: 'deploy', kind: 'task' }, {});
+
+        assert.equal(sent[0].url, 'http://cheto.test/api/v1/agent/search?q=deploy&kind%5B%5D=task');
+    });
+
+    it('names the talk permission when an older token lacks it', async () => {
+        const answers = await exchange([call('cheto_channel_post', { channel: 12, body: 'hola' })], {
+            env: human,
+            fetchImpl: ok({ message: 'This credential was not granted that.' }, 403),
+        });
+        const text = answers[0].result.content[0].text;
+
+        assert.match(text, /`talk:write`/);
+        assert.match(text, /run `cheto login` again, or edit the token's permissions in the panel/);
+    });
+
+    it('explains an agent\'s refusal by its capabilities, and done as never allowed', async () => {
+        const answers = await exchange([call('cheto_task_delete', { id: 7 })], { fetchImpl: ok({ message: 'This membership may not delete tasks.' }, 403) });
+        const text = answers[0].result.content[0].text;
+
+        assert.match(text, /may not delete tasks/);
+        assert.match(text, /tasks\.delete/);
+        assert.match(text, /never set a task to done/);
+    });
+});
+
+describe('CHETO_TOOLS', () => {
+    it('agents: only the agent tools under their plain names, each requiring agent, plus cheto_agents', async () => {
+        const [answer] = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/list' }], { env: { CHETO_TOOLS: 'agents', CHETO_TOKEN: 'cheto_ut_x' } });
+        const names = answer.result.tools.map((tool) => tool.name);
+
+        assert.ok(names.includes('cheto_agents'));
+        assert.ok(names.includes('cheto_inbox'));
+        assert.ok(names.includes('cheto_task_create'));
+        assert.ok(!names.some((name) => name.startsWith('cheto_agent_') && name !== 'cheto_agents'));
+        assert.ok(!names.includes('cheto_area_create') || answer.result.tools.find((tool) => tool.name === 'cheto_area_create').inputSchema.required.includes('agent'));
+        for (const tool of answer.result.tools.filter((tool) => tool.name !== 'cheto_agents')) {
+            assert.ok(tool.inputSchema.required.includes('agent'), `${tool.name} must require agent`);
+        }
+        assert.equal(new Set(names).size, names.length);
+    });
+
+    it('person: only the person tools', async () => {
+        const [answer] = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/list' }], { env: { CHETO_TOOLS: 'person', CHETO_TOKEN: 'cheto_ut_x' } });
+        const names = answer.result.tools.map((tool) => tool.name);
+
+        assert.ok(names.includes('cheto_areas'));
+        assert.ok(!names.includes('cheto_heartbeat'));
+    });
 });

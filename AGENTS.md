@@ -25,6 +25,10 @@ This is its own repository (`getcheto/mcp`). The application lives in
   `agent`. See `src/toolset.js`.
 - An agent cannot close a task and cannot create participants. The API refuses
   those; this client must refuse them too, not retry.
+- Everything else an agent may do is its membership's capabilities
+  (`tasks.create`, `tasks.edit_any`, `tasks.delete`, `boards.manage`,
+  `channels.post`, `memory.write`), enforced by the server. The tools are
+  offered regardless; a 403 is passed on in words, never retried.
 - The database on the server is the source of truth. Do not treat a tool result
   as state to cache across turns.
 - Run `npm test` (`node --test`) before calling a change done. The application

@@ -44,7 +44,13 @@ export async function serve({ input = process.stdin, output = process.stdout, en
     const { url, token } = credential;
 
     const cheto = new Cheto({ url, token, workspace: env.CHETO_WORKSPACE ?? null });
-    const tools = toolsFor(cheto.kind);
+    const selection = String(env.CHETO_TOOLS ?? 'all').toLowerCase();
+
+    if (!['all', 'agents', 'person'].includes(selection)) {
+        throw new Error(`CHETO_TOOLS must be all, agents or person (got "${env.CHETO_TOOLS}").`);
+    }
+
+    const tools = toolsFor(cheto.kind, selection);
 
     // Where the credential came from, who it is and which half of the API it
     // reaches — never what it is. A person debugging "why is it commenting as

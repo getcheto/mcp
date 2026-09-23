@@ -126,7 +126,10 @@ export class Cheto {
             return payload;
         }
 
-        throw new ChetoError(explain(response.status, payload, { surface, kind: this.kind, agent: extra['X-Cheto-Agent'] ?? null }), response.status);
+        throw new ChetoError(
+            explain(response.status, payload, { surface, kind: this.kind, agent: extra['X-Cheto-Agent'] ?? null, method, path }),
+            response.status,
+        );
     }
 }
 
@@ -137,6 +140,43 @@ function keyPart(value) {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-|-$/g, '')
         .slice(0, 48);
+}
+
+/** The sentence the server answers a missing scope with, in English and Spanish. */
+const MISSING_SCOPE = /not granted that|no tiene ese permiso/i;
+
+/**
+ * Which scope a call on the person's surface needs, mirroring routes/api.php.
+ *
+ * Only used to name it in a refusal, so a person knows what to grant rather
+ * than which command to rerun blind. The server remains the one that decides.
+ */
+function cliScopeFor(method, path) {
+    const route = String(path).split('?')[0];
+    const reading = String(method).toUpperCase() === 'GET';
+    const first = route.split('/').filter(Boolean)[0] ?? '';
+
+    if (['me', 'agents'].includes(first)) {
+        return reading ? 'agents:read' : 'agents:write';
+    }
+
+    if (['memberships', 'connections'].includes(first)) {
+        return 'machines:write';
+    }
+
+    if (first === 'areas') {
+        return reading ? 'work:read' : 'work:write';
+    }
+
+    if (['tasks', 'reviews', 'inbox'].includes(first)) {
+        return reading ? 'tasks:read' : 'tasks:write';
+    }
+
+    if (['channels', 'memory', 'search'].includes(first)) {
+        return reading ? 'talk:read' : 'talk:write';
+    }
+
+    return null;
 }
 
 function safeParse(text) {
@@ -160,7 +200,7 @@ function safeParse(text) {
  * somebody to log in again because they misspelled a handle sends them the
  * wrong way.
  */
-function explain(status, payload, { surface = 'agent', kind = 'agent', agent = null } = {}) {
+function explain(status, payload, { surface = 'agent', kind = 'agent', agent = null, method = 'GET', path = '' } = {}) {
     const said = payload?.message ?? '';
     const code = payload?.error ?? null;
 
@@ -192,14 +232,27 @@ function explain(status, payload, { surface = 'agent', kind = 'agent', agent = n
         return `${said || 'That agent works in several workspaces.'} Pass \`workspace\` (uuid or slug) to say which one. cheto_agents shows the workspace of each of its handles.`;
     }
 
-    if (code === 'missing_scope') {
-        return `${said || 'This credential lacks a scope this needs.'} A credential minted before that scope existed does not have it: run \`cheto login\` again, then restart this MCP server.`;
+    // The CLI surface refuses a missing scope with a plain 403 and a sentence,
+    // no code — so it is recognised by that sentence, in either locale the
+    // server ships, as well as by the code the delegated agent path sends.
+    if (code === 'missing_scope' || (surface === 'cli' && status === 403 && MISSING_SCOPE.test(said))) {
+        const scope = surface === 'cli' ? cliScopeFor(method, path) : null;
+        const talk = scope?.startsWith('talk:');
+
+        return (
+            `${said || 'This credential lacks a scope this needs.'}` +
+            (scope ? ` This call needs the \`${scope}\` permission.` : '') +
+            (talk
+                ? ' Channels, memory and search became reachable from a terminal after many tokens were minted, so an older token does not have it:'
+                : ' A credential minted before that scope existed does not have it:') +
+            " run `cheto login` again, or edit the token's permissions in the panel, then restart this MCP server."
+        );
     }
 
     if (status === 403) {
         return surface === 'cli'
-            ? `${said || 'Refused.'} A terminal credential reaches the workspaces you are a member of, and only what \`cheto login\` granted it — one minted before a scope existed does not have that scope, and running \`cheto login\` again is how it gets one.`
-            : `${said || 'Refused.'} Two rules cause most of these: an agent may never set a task to done — move it to review and ask somebody — and an agent may only act on work it created or holds.`;
+            ? `${said || 'Refused.'} A terminal credential reaches the workspaces you are a member of, the agents the token covers, and only what \`cheto login\` granted it — one minted before a scope existed does not have that scope, and running \`cheto login\` again (or editing the token in the panel) is how it gets one.`
+            : `${said || 'Refused.'} Two things cause these. First, an agent may never set a task to done — move it to review and ask somebody. Second, everything else an agent may do is its membership's capabilities (membership.capabilities in cheto_whoami, or cheto_agent_whoami on a person's token: tasks.create, tasks.edit_any, tasks.delete, boards.manage, channels.post, memory.write); without tasks.edit_any it may only act on work it created or holds. Only the agent's owner changes them, in the panel or with cheto_agent_update.`;
     }
 
     if (status === 404) {

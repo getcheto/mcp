@@ -18,11 +18,15 @@
  *
  * - A work tool called without `agent` is refused before anything is sent. It
  *   never falls back to the person.
- * - Four tools exist in both sets with the same name — whoami, tasks,
- *   task_create, task_update. The person keeps the plain name; the agent's
- *   variant is `cheto_agent_…`. And a person's tool handed an `agent` argument
- *   is refused, naming the variant, rather than quietly running as the person
- *   with the argument ignored.
+ * - Most tools exist in both sets with the same name — whoami, inbox, tasks,
+ *   task, task_create, task_update, task_delete, task_comment, the reviews,
+ *   channels, memory, search and the board tools — because a person and an
+ *   agent can now do the same work. The person keeps the plain name; the
+ *   agent's variant is `cheto_agent_…`, computed below from whatever overlaps,
+ *   so a tool added to both sets is renamed without anybody remembering to.
+ *   And a person's tool handed an `agent` argument is refused, naming the
+ *   variant, rather than quietly running as the person with the argument
+ *   ignored.
  */
 import { HUMAN_TOOLS } from './human-tools.js';
 import { TOOLS } from './tools.js';
@@ -38,9 +42,31 @@ const WORKSPACE_ARGUMENT = {
         'Workspace uuid or slug, only needed when the agent works in more than one (Cheto then answers ambiguous_agent). Defaults to CHETO_WORKSPACE when the server was started with one.',
 };
 
-export function toolsFor(kind) {
+/**
+ * `selection` narrows a person's credential to one audience (CHETO_TOOLS):
+ *
+ * - `all` (default): the person's tools and the agent tools, as above.
+ * - `agents`: only the agent tools, under their plain names — each still
+ *   requiring `agent` — plus `cheto_agents`, so a model can look up the id it
+ *   was told to use. The setup for a team of agents on one server: they never
+ *   see a tool that would act as the person.
+ * - `person`: only the person's own tools.
+ *
+ * An agent credential ignores it: it only ever has the agent tools.
+ */
+export function toolsFor(kind, selection = 'all') {
     if (kind !== 'user') {
         return TOOLS;
+    }
+
+    if (selection === 'person') {
+        return HUMAN_TOOLS.map((tool) => asPerson(tool, new Map()));
+    }
+
+    if (selection === 'agents') {
+        const lookup = HUMAN_TOOLS.filter((tool) => tool.name === 'cheto_agents');
+
+        return [...lookup, ...TOOLS.map((tool) => asAgent(tool, new Map()))];
     }
 
     const human = new Set(HUMAN_TOOLS.map((tool) => tool.name));
