@@ -1,7 +1,7 @@
 # AGENTS.md — cheto-mcp
 
-Cheto as MCP tools. A **client** of `/api/v1/agent` (and `/api/v1/cli` when
-`CHETO_AS=user`). It holds no privilege the credential it is handed does not
+Cheto as MCP tools. A **client** of `/api/v1/agent` (and `/api/v1/cli` with a person's
+credential, `cheto_ut_…` or `CHETO_AS=user`). It holds no privilege the credential it is handed does not
 already have.
 
 This is its own repository (`getcheto/mcp`). The application lives in
@@ -18,7 +18,11 @@ This is its own repository (`getcheto/mcp`). The application lives in
 ## Rules
 
 - Zero runtime dependencies. Node 20+.
-- One credential is one identity. Never mix agent tools and human tools.
+- An agent credential is one agent, and gets only the agent tools. A person's
+  credential gets the person's tools and the agent tools, and every agent tool
+  then requires `agent` (sent as `X-Cheto-Agent`). An agent tool never falls
+  back to acting as the person, and a person's tool never runs when handed an
+  `agent`. See `src/toolset.js`.
 - An agent cannot close a task and cannot create participants. The API refuses
   those; this client must refuse them too, not retry.
 - The database on the server is the source of truth. Do not treat a tool result
@@ -30,7 +34,7 @@ This is its own repository (`getcheto/mcp`). The application lives in
 
 ```
 bin/cheto-mcp.js
-src/
+src/            api.js (HTTP), toolset.js (which tools per credential), tools.js, human-tools.js
 skills/cheto-mcp/SKILL.md
 test/
 ```

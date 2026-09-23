@@ -12,14 +12,19 @@
  *   CHETO_URL        where Cheto is
  *   CHETO_TOKEN      the credential — `cheto_ak_…` for an agent, `cheto_ut_…` for a
  *                   person from `cheto login`
+ *   CHETO_AS         `user` reads the person's own credential from the keychain
  *   CHETO_AGENT      which connected agent to act as, when the bridge armed several
  *   CHETO_WORKSPACE  with a human credential, the workspace to act in by default,
  *                   so one MCP entry per workspace needs no argument repeated
  *
  * **The token decides which tools exist.** An agent credential gets the work
- * tools; a human one gets the tools that shape the boards, which an agent
- * credential may not have and is not going to be given. Two sets, never mixed,
- * and nothing here can act as somebody it is not.
+ * tools, as the one agent the token is. A human one gets the tools that shape
+ * the boards, which an agent credential may not have and is not going to be
+ * given — and the work tools as well, each requiring `agent`: one of the
+ * person's own agents to act as, checked by the server on every call. That is
+ * how one server and one token serve a team of agents, each under its own name.
+ * See toolset.js for how the two sets are kept from being mistaken for each
+ * other.
  *
  * All three are optional together: on a machine that has run `cheto connect`,
  * leaving them unset reads the credential the bridge already put in the OS
@@ -30,8 +35,7 @@
  */
 import { Cheto, ChetoError } from './api.js';
 import { resolveCredential } from './credentials.js';
-import { HUMAN_TOOLS } from './human-tools.js';
-import { TOOLS } from './tools.js';
+import { toolsFor } from './toolset.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 
@@ -40,14 +44,16 @@ export async function serve({ input = process.stdin, output = process.stdout, en
     const { url, token } = credential;
 
     const cheto = new Cheto({ url, token, workspace: env.CHETO_WORKSPACE ?? null });
-    const tools = cheto.surface === 'cli' ? HUMAN_TOOLS : TOOLS;
+    const tools = toolsFor(cheto.kind);
 
     // Where the credential came from, who it is and which half of the API it
     // reaches — never what it is. A person debugging "why is it commenting as
     // Rocky", or "why is there no cheto_inbox", needs this line; a screen
     // recording must not capture a bearer token.
     process.stderr.write(
-        `cheto-mcp: ${url}${credential.handle ? ` as @${credential.handle}` : ''} (${cheto.surface === 'cli' ? 'human credential' : 'agent credential'} from ${credential.source})\n`,
+        cheto.kind === 'user'
+            ? `cheto-mcp: ${url} (human credential from ${credential.source}; agent tools act as the agent each call names)\n`
+            : `cheto-mcp: ${url}${credential.handle ? ` as @${credential.handle}` : ''} (agent credential from ${credential.source})\n`,
     );
 
     const write = (message) => output.write(JSON.stringify(message) + '\n');

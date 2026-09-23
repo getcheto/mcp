@@ -555,10 +555,11 @@ describe('the credential decides the surface', () => {
         assert.ok(!names(asAgent).includes('cheto_area_create'));
         assert.ok(!names(asAgent).includes('cheto_column_add'));
 
-        // And the reverse, so neither set is quietly a superset of the other:
-        // a person's credential is not an agent and has no inbox of its own.
+        // A person has no inbox of their own. The one a person's credential is
+        // offered is an agent's, and it cannot be called without naming which.
         assert.ok(names(asAgent).includes('cheto_inbox'));
-        assert.ok(!names(asHuman).includes('cheto_inbox'));
+        const inbox = asHuman[0].result.tools.find((tool) => tool.name === 'cheto_inbox');
+        assert.ok(inbox.inputSchema.required.includes('agent'));
     });
 
     it('talks to the human half of the API, not the agent half', async () => {
@@ -623,7 +624,7 @@ describe('the credential decides the surface', () => {
         assert.match(answers[0].result.content[0].text, /CHETO_WORKSPACE/);
     });
 
-    it('administers agents without ever being able to speak as one', async () => {
+    it('administers agents without any tool named for impersonating one', async () => {
         const names = (await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }], { env: human }))[0].result.tools.map(
             (tool) => tool.name,
         );
@@ -880,4 +881,201 @@ describe('the credential decides the surface', () => {
         assert.equal(answers[0].result.isError, true);
         assert.match(answers[0].result.content[0].text, /at least one thing to say/);
     });
+});
+
+describe('one person\'s token, a team of agents', () => {
+    const human = { CHETO_TOKEN: 'cheto_ut_secret' };
+    const list = async (env) => (await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }], { env }))[0].result.tools;
+    const recording = (sent, body = { data: { id: 7 } }) => async (url, options) => {
+        sent.push({ url, headers: options.headers, body: options.body ? JSON.parse(options.body) : null });
+
+        return { ok: true, status: 200, text: async () => JSON.stringify(body) };
+    };
+
+    it('offers both sets, with no name twice and the agent twins named for the agent', async () => {
+        const tools = await list(human);
+        const names = tools.map((tool) => tool.name);
+
+        assert.equal(new Set(names).size, names.length, 'a name offered twice is a coin toss for the client');
+
+        for (const name of ['cheto_areas', 'cheto_agents', 'cheto_whoami', 'cheto_tasks', 'cheto_task_create', 'cheto_task_update', 'cheto_task_delete']) {
+            assert.ok(names.includes(name), `expected the person's ${name}`);
+        }
+
+        for (const name of ['cheto_inbox', 'cheto_task_comment', 'cheto_agent_whoami', 'cheto_agent_tasks', 'cheto_agent_task_create', 'cheto_agent_task_update']) {
+            assert.ok(names.includes(name), `expected the agent's ${name}`);
+        }
+
+        // Every tool that acts as an agent requires saying which.
+        for (const tool of tools.filter((one) => ['cheto_inbox', 'cheto_task_comment', 'cheto_agent_whoami', 'cheto_agent_task_create'].includes(one.name))) {
+            assert.ok(tool.inputSchema.required.includes('agent'), `${tool.name} must require agent`);
+            assert.equal(tool.inputSchema.properties.agent.type, 'string');
+            assert.ok(tool.inputSchema.properties.workspace);
+        }
+
+        // And the person's own do not ask for one.
+        assert.equal(tools.find((tool) => tool.name === 'cheto_whoami').inputSchema.properties.agent, undefined);
+    });
+
+    it('acts as the agent it names, on the agent surface, with the person\'s token', async () => {
+        const sent = [];
+
+        const answers = await exchange(
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_comment', arguments: { agent: 'magui.x1y2@cheto', id: 7, body: 'Done, see PR' } } }],
+            { env: human, fetchImpl: recording(sent) },
+        );
+
+        assert.equal(answers[0].result.isError, undefined);
+        assert.equal(sent.length, 1);
+        assert.equal(sent[0].url, 'http://cheto.test/api/v1/agent/tasks/7/comments');
+        assert.equal(sent[0].headers.Authorization, 'Bearer cheto_ut_secret');
+        assert.equal(sent[0].headers['X-Cheto-Agent'], 'magui.x1y2@cheto');
+        assert.equal(sent[0].headers['X-Cheto-Workspace'], undefined);
+        assert.deepEqual(sent[0].body, { body: 'Done, see PR' });
+    });
+
+    it('names the workspace when asked, and keys a retry to the agent', async () => {
+        const sent = [];
+
+        await exchange(
+            [
+                { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_claim', arguments: { agent: '@magui', workspace: 'appsi', id: 7 } } },
+                { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'cheto_task_claim', arguments: { agent: '@rocky', workspace: 'appsi', id: 7 } } },
+            ],
+            { env: human, fetchImpl: recording(sent) },
+        );
+
+        assert.equal(sent[0].headers['X-Cheto-Workspace'], 'appsi');
+        assert.equal(sent[0].headers['X-Cheto-Agent'], '@magui');
+
+        // Two agents doing the same thing are two things, not one retried.
+        assert.match(sent[0].headers['Idempotency-Key'], /magui/);
+        assert.notEqual(sent[0].headers['Idempotency-Key'], sent[1].headers['Idempotency-Key']);
+    });
+
+    it('defaults the workspace to the one the server was started for', async () => {
+        const sent = [];
+
+        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_inbox', arguments: { agent: 'magui' } } }], {
+            env: { ...human, CHETO_WORKSPACE: 'savia' },
+            fetchImpl: recording(sent, { summary: { has_work: false } }),
+        });
+
+        assert.equal(sent[0].url, 'http://cheto.test/api/v1/agent/inbox');
+        assert.equal(sent[0].headers['X-Cheto-Workspace'], 'savia');
+    });
+
+    it('runs a twin as the agent under its agent name', async () => {
+        const sent = [];
+
+        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_agent_whoami', arguments: { agent: 'rocky.a7f3@cheto' } } }], {
+            env: human,
+            fetchImpl: recording(sent, { via: 'user_token' }),
+        });
+
+        assert.equal(sent[0].url, 'http://cheto.test/api/v1/agent/me');
+        assert.equal(sent[0].headers['X-Cheto-Agent'], 'rocky.a7f3@cheto');
+    });
+
+    it('refuses an agent tool with no agent, and sends nothing', async () => {
+        const sent = [];
+
+        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_comment', arguments: { id: 7, body: 'hi' } } }], {
+            env: human,
+            fetchImpl: recording(sent),
+        });
+
+        assert.equal(answers[0].result.isError, true);
+        assert.match(answers[0].result.content[0].text, /Pass `agent`/);
+        assert.equal(sent.length, 0, 'it must never fall back to acting as the person');
+    });
+
+    it('refuses the person\'s tool when an agent was named, rather than acting as the person', async () => {
+        const sent = [];
+
+        const answers = await exchange(
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_create', arguments: { agent: '@magui', workspace: 'appsi', title: 'x' } } }],
+            { env: human, fetchImpl: recording(sent) },
+        );
+
+        assert.equal(answers[0].result.isError, true);
+        assert.match(answers[0].result.content[0].text, /cheto_agent_task_create/);
+        assert.equal(sent.length, 0);
+    });
+
+    it('lists each agent with the id to pass and the workspace of each handle', async () => {
+        const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_agents', arguments: {} } }], {
+            env: human,
+            fetchImpl: ok({
+                data: [
+                    {
+                        id: 3,
+                        name: 'Magui',
+                        address: 'magui.x1y2@cheto',
+                        memberships: [{ id: 6, handle: 'magui', mention: '@magui', workspace: { id: 1, uuid: 'w-uuid', name: 'Appsi', slug: 'appsi' } }],
+                    },
+                ],
+            }),
+        });
+
+        const result = JSON.parse(answers[0].result.content[0].text);
+
+        assert.equal(result.act_as[0].agent, 'magui.x1y2@cheto');
+        assert.deepEqual(result.act_as[0].handles[0], { agent: '@magui', workspace: 'w-uuid', workspace_name: 'Appsi', workspace_slug: 'appsi' });
+        assert.match(result.how_to_act_as, /Pass `agent`/);
+        assert.equal(result.data[0].id, 3, 'the raw list stays, for administering');
+    });
+
+    it('offers an agent token no agent argument and sends no agent header', async () => {
+        const tools = await list({});
+        const sent = [];
+
+        assert.ok(tools.every((tool) => !tool.inputSchema.properties?.agent));
+        assert.ok(!tools.some((tool) => tool.name.startsWith('cheto_agent_')));
+
+        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_inbox', arguments: {} } }], { fetchImpl: recording(sent, {}) });
+
+        assert.equal(sent[0].url, 'http://cheto.test/api/v1/agent/inbox');
+        assert.equal(sent[0].headers.Authorization, 'Bearer cheto_ak_x');
+        assert.equal(sent[0].headers['X-Cheto-Agent'], undefined);
+    });
+
+    it('says a dead person\'s credential needs `cheto login`, and a dead agent\'s a new pairing', async () => {
+        const asPerson = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_inbox', arguments: { agent: '@magui' } } }], {
+            env: human,
+            fetchImpl: ok({ message: 'Unauthenticated.' }, 401),
+        });
+        const asAgent = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_inbox', arguments: {} } }], {
+            fetchImpl: ok({ message: 'Unauthenticated.' }, 401),
+        });
+
+        assert.match(asPerson[0].result.content[0].text, /no longer valid \(revoked or expired/);
+        assert.match(asPerson[0].result.content[0].text, /cheto login/);
+        assert.match(asAgent[0].result.content[0].text, /no longer valid \(revoked or expired/);
+        assert.match(asAgent[0].result.content[0].text, /pairing code/);
+    });
+
+    const refusals = [
+        [400, 'agent_required', /Pass `agent`/],
+        [400, 'agent_mismatch', /already is one agent/],
+        [404, 'no_such_agent', /cheto_agents lists them/],
+        [409, 'ambiguous_agent', /Pass `workspace`/],
+        [403, 'missing_scope', /run `cheto login` again/],
+    ];
+
+    for (const [status, code, pattern] of refusals) {
+        it(`explains ${code} with the server's own words, and not as a dead credential`, async () => {
+            const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_inbox', arguments: { agent: '@magui' } } }], {
+                env: human,
+                fetchImpl: ok({ message: `Server says ${code}.`, error: code }, status),
+            });
+
+            const text = answers[0].result.content[0].text;
+
+            assert.equal(answers[0].result.isError, true);
+            assert.match(text, new RegExp(`Server says ${code}`));
+            assert.match(text, pattern);
+            assert.doesNotMatch(text, /no longer valid/);
+        });
+    }
 });

@@ -19,17 +19,22 @@ export class ChetoError extends Error {
 
 export class Cheto {
     /**
-     * Which half of the API this credential belongs to, from the credential.
+     * Which kind of credential this is, from the credential.
      *
      * `cheto_ak_…` is an agent: one workspace, fixed by the token, and no say in
      * how the room is arranged. `cheto_ut_…` is a person from a terminal: several
      * workspaces, which is why those tools ask which one, and the authority to
      * create a board — which an agent credential does not have and is not going
-     * to be given. Two surfaces, two tool sets, and the token decides.
+     * to be given.
+     *
+     * `surface` is where a call goes when it does not say: `/api/v1/cli` for a
+     * person, `/api/v1/agent` for an agent. A person's credential can also reach
+     * the agent surface, as one of their own agents — see `actingAs`.
      */
     constructor({ url, token, workspace = null }) {
-        this.surface = String(token ?? '').startsWith('cheto_ut_') ? 'cli' : 'agent';
-        this.base = String(url).replace(/\/+$/, '') + `/api/v1/${this.surface}`;
+        this.kind = String(token ?? '').startsWith('cheto_ut_') ? 'user' : 'agent';
+        this.surface = this.kind === 'user' ? 'cli' : 'agent';
+        this.root = String(url).replace(/\/+$/, '') + '/api/v1/';
         this.token = token;
 
         // A default for `workspace`, so an MCP entry pointed at one workspace
@@ -38,11 +43,51 @@ export class Cheto {
         this.workspace = workspace;
     }
 
-    async call(path, { method = 'GET', body = null, idempotencyKey = null, timeoutMs = TIMEOUT_MS } = {}) {
+    /**
+     * The same credential, speaking on the agent surface as one agent.
+     *
+     * Only a person's credential does this, and only for an agent that person
+     * owns: the server checks both, on every request, and answers 404 for
+     * anybody else's. What this adds is the header that names the agent, so
+     * the call is attributed to it — never to the person — and an idempotency
+     * key that carries the agent too, because two agents filing the same title
+     * are two tasks, not a retry.
+     *
+     * The returned object has the same `call` the agent tools already use, so
+     * they run unchanged against it.
+     */
+    actingAs(agent, workspace = null) {
+        const named = String(agent ?? '').trim();
+
+        if (named === '') {
+            throw new ChetoError('Say which agent to act as. Pass `agent`: its Cheto address (rocky.a7f3@cheto) or its @handle. cheto_agents lists them.', 0);
+        }
+
+        const where = String(workspace ?? this.workspace ?? '').trim();
+        const headers = { 'X-Cheto-Agent': named, ...(where ? { 'X-Cheto-Workspace': where } : {}) };
+        const suffix = `-as-${keyPart(named)}${where ? `-in-${keyPart(where)}` : ''}`;
+
+        return {
+            kind: this.kind,
+            surface: 'agent',
+            agent: named,
+            workspace: where || null,
+            call: (path, options = {}) =>
+                this.call(path, {
+                    ...options,
+                    surface: 'agent',
+                    headers: { ...headers, ...(options.headers ?? {}) },
+                    idempotencyKey: options.idempotencyKey ? options.idempotencyKey + suffix : null,
+                }),
+        };
+    }
+
+    async call(path, { method = 'GET', body = null, idempotencyKey = null, timeoutMs = TIMEOUT_MS, surface = this.surface, headers: extra = {} } = {}) {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
 
         const headers = {
+            ...extra,
             Authorization: `Bearer ${this.token}`,
             Accept: 'application/json',
         };
@@ -59,7 +104,7 @@ export class Cheto {
         let response;
 
         try {
-            response = await fetch(this.base + path, {
+            response = await fetch(this.root + surface + path, {
                 method,
                 headers,
                 body: body === null ? undefined : JSON.stringify(body),
@@ -81,8 +126,17 @@ export class Cheto {
             return payload;
         }
 
-        throw new ChetoError(explain(response.status, payload, this.surface), response.status);
+        throw new ChetoError(explain(response.status, payload, { surface, kind: this.kind, agent: extra['X-Cheto-Agent'] ?? null }), response.status);
     }
+}
+
+/** An agent or workspace name as a piece of an idempotency key. */
+function keyPart(value) {
+    return String(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 48);
 }
 
 function safeParse(text) {
@@ -99,14 +153,47 @@ function safeParse(text) {
  * A model handed `403` will try again with different arguments. A model handed
  * "an agent may never close a task; move it to review and ask somebody" stops
  * and does the right thing, so the rule is stated where the refusal happens.
+ *
+ * Only a 401 means the credential is dead. The codes for naming an agent —
+ * `agent_required`, `agent_mismatch`, `no_such_agent`, `ambiguous_agent` — and
+ * `missing_scope` are about this one call, and are explained as such: telling
+ * somebody to log in again because they misspelled a handle sends them the
+ * wrong way.
  */
-function explain(status, payload, surface = 'agent') {
+function explain(status, payload, { surface = 'agent', kind = 'agent', agent = null } = {}) {
     const said = payload?.message ?? '';
+    const code = payload?.error ?? null;
 
     if (status === 401) {
-        return surface === 'cli'
-            ? 'The credential is unknown, revoked or expired. Run `cheto login` again.'
-            : 'The credential is unknown, revoked or expired. Issue a new token in the panel under Agents.';
+        if (kind === 'user') {
+            return (
+                'This credential is no longer valid (revoked or expired; a `cheto login` token lasts 90 days). ' +
+                'Run `cheto login` again, then restart this MCP server so it reads the new one.' +
+                (agent ? ` If only calls as ${agent} are refused this way, the connection for that agent was disconnected in the panel; the next call as it opens a new one once the credential is valid.` : '')
+            );
+        }
+
+        return 'This credential is no longer valid (revoked or expired). Connect this machine again with a new pairing code (`cheto connect <code>`), or issue a new token in the panel under Agents, and restart this MCP server.';
+    }
+
+    if (code === 'agent_required') {
+        return `${said || 'This call needs an agent to act as.'} Pass \`agent\`: the agent's Cheto address (rocky.a7f3@cheto) or its @handle. cheto_agents lists the ones you can act as.`;
+    }
+
+    if (code === 'agent_mismatch') {
+        return `${said || 'This credential is a different agent.'} An agent credential already is one agent; it cannot act as another. Use a person's credential (\`cheto login\`) to act as several.`;
+    }
+
+    if (code === 'no_such_agent') {
+        return `${said || 'No such agent.'} Only an agent you own, with an active place in a workspace, can be acted as — named by its Cheto address (rocky.a7f3@cheto) or its handle there. cheto_agents lists them.`;
+    }
+
+    if (code === 'ambiguous_agent') {
+        return `${said || 'That agent works in several workspaces.'} Pass \`workspace\` (uuid or slug) to say which one. cheto_agents shows the workspace of each of its handles.`;
+    }
+
+    if (code === 'missing_scope') {
+        return `${said || 'This credential lacks a scope this needs.'} A credential minted before that scope existed does not have it: run \`cheto login\` again, then restart this MCP server.`;
     }
 
     if (status === 403) {
@@ -118,7 +205,7 @@ function explain(status, payload, surface = 'agent') {
     if (status === 404) {
         return surface === 'cli'
             ? 'No such thing you can reach. A terminal credential sees the workspaces you belong to, and a board is named by uuid or id here — never by slug, which would be ambiguous across two of them.'
-            : 'No such thing in this workspace. A credential reaches exactly one workspace, and anything outside it looks like it does not exist.';
+            : 'No such thing in this workspace. An agent reaches exactly one workspace, and anything outside it looks like it does not exist.';
     }
 
     if (status === 422) {

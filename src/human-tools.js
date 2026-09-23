@@ -31,11 +31,13 @@
  * a task are here: not because a person is trusted more in general, but because
  * this particular act has no meaning for a machine identity.
  *
- * Two things are still deliberately absent, and they are the same two the panel
- * is careful about. **There is no tool to act as an agent**: one credential is
- * one identity, and a person's token writing under an agent's name would make
- * every author line a guess. And **nothing here touches an account** — no
- * passwords, no roles, no invitations, no deleting a person. Removing a task is
+ * Acting as one of the person's own agents is not in this file. The same token
+ * can do it — the work tools in tools.js, each run with a required `agent`, on
+ * the agent surface, where the server checks that the agent is the person's own
+ * and attributes the work to it and records the person beside it (toolset.js).
+ * Nothing here writes under an agent's name, and nothing there writes under the
+ * person's. **Nothing here touches an account** — no passwords, no roles, no
+ * invitations, no deleting a person. Removing a task is
  * not that: it is a card off a board, soft-deleted, and something the same
  * person does in the panel with one click.
  *
@@ -216,9 +218,9 @@ export const HUMAN_TOOLS = [
     {
         name: 'cheto_agents',
         description:
-            'The agents you own: what each one is called in each workspace, its charter, its board, and which machines are armed for it. The administrative view — somebody else\'s agent is not yours to administer and is not here.',
+            'The agents you own: each one\'s Cheto address, what it is called in each workspace, its charter, its board, and which machines are armed for it. `act_as` is the short answer to "which id do I pass": the value for `agent` on the agent tools — the address, or the @handle in a workspace — and the workspace each handle belongs to. Somebody else\'s agent is not yours to administer or act as, and is not here.',
         inputSchema: { type: 'object', properties: {} },
-        run: (cheto) => cheto.call('/agents'),
+        run: async (cheto) => withActAs(await cheto.call('/agents')),
     },
     {
         name: 'cheto_agent_create',
@@ -422,6 +424,35 @@ export const HUMAN_TOOLS = [
         },
     },
 ];
+
+/**
+ * The agent list, with the one thing an agent reading it is looking for.
+ *
+ * An agent run on a person's token has to say who it is on every call, and the
+ * raw list buries the answer in memberships and connections. `act_as` puts it
+ * first: the address, which is unique across Cheto and never ambiguous, and
+ * each handle with the workspace it belongs to — a handle alone is ambiguous
+ * the moment the agent works in two. The raw list stays, for administering.
+ */
+function withActAs(answer) {
+    const agents = Array.isArray(answer?.data) ? answer.data : [];
+
+    return {
+        how_to_act_as:
+            'Pass `agent` to an agent tool with the address below (preferred: unique everywhere) or with an @handle. When the agent works in more than one workspace and you name it by handle, pass `workspace` too.',
+        act_as: agents.map((agent) => ({
+            name: agent.name,
+            agent: agent.address ?? null,
+            handles: (agent.memberships ?? []).map((membership) => ({
+                agent: membership.mention ?? (membership.handle ? `@${membership.handle}` : null),
+                workspace: membership.workspace?.uuid ?? membership.workspace?.slug ?? null,
+                workspace_name: membership.workspace?.name ?? null,
+                workspace_slug: membership.workspace?.slug ?? null,
+            })),
+        })),
+        ...answer,
+    };
+}
 
 /**
  * Which workspace, from the call or from how this server was started.
