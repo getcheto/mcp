@@ -165,6 +165,24 @@ describe('naming somebody', () => {
         assert.deepEqual(sent.at(-1).body, { assignee_type: 'agent', assignee_id: 6 });
     });
 
+    it('finds a handle with an accent when it is typed without one', async () => {
+        const sent = [];
+
+        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_assign', arguments: { id: 7, to: '@lucia' } } }], {
+            fetchImpl: async (url, options) => {
+                sent.push(options.body ? JSON.parse(options.body) : null);
+
+                return {
+                    ok: true,
+                    status: 200,
+                    text: async () => JSON.stringify(url.endsWith('/me') ? { participants: [{ type: 'user', id: 4, name: 'Lucía Gómez', slug: 'lucía' }] } : { data: { id: 7 } }),
+                };
+            },
+        });
+
+        assert.deepEqual(sent.at(-1), { assignee_type: 'user', assignee_id: 4 });
+    });
+
     it('says who is actually here when the handle is wrong', async () => {
         const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_assign', arguments: { id: 7, to: 'nobody' } } }], {
             fetchImpl: ok({ participants: [{ type: 'agent', id: 6, name: 'Magui', slug: 'magui' }] }),
@@ -942,14 +960,14 @@ describe('one person\'s token, a team of agents', () => {
 
         await exchange(
             [
-                { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_claim', arguments: { agent: '@magui', workspace: 'appsi', id: 7 } } },
-                { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'cheto_task_claim', arguments: { agent: '@rocky', workspace: 'appsi', id: 7 } } },
+                { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_claim', arguments: { agent: 'magui.b2c4@cheto', workspace: 'appsi', id: 7 } } },
+                { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'cheto_task_claim', arguments: { agent: 'rocky.a7f3@cheto', workspace: 'appsi', id: 7 } } },
             ],
             { env: human, fetchImpl: recording(sent) },
         );
 
         assert.equal(sent[0].headers['X-Cheto-Workspace'], 'appsi');
-        assert.equal(sent[0].headers['X-Cheto-Agent'], '@magui');
+        assert.equal(sent[0].headers['X-Cheto-Agent'], 'magui.b2c4@cheto');
 
         // Two agents doing the same thing are two things, not one retried.
         assert.match(sent[0].headers['Idempotency-Key'], /magui/);
@@ -959,7 +977,7 @@ describe('one person\'s token, a team of agents', () => {
     it('defaults the workspace to the one the server was started for', async () => {
         const sent = [];
 
-        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_agent_inbox', arguments: { agent: 'magui' } } }], {
+        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_agent_inbox', arguments: { agent: 'magui.b2c4@cheto' } } }], {
             env: { ...human, CHETO_WORKSPACE: 'savia' },
             fetchImpl: recording(sent, { summary: { has_work: false } }),
         });
@@ -997,7 +1015,7 @@ describe('one person\'s token, a team of agents', () => {
         const sent = [];
 
         const answers = await exchange(
-            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_create', arguments: { agent: '@magui', workspace: 'appsi', title: 'x' } } }],
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_create', arguments: { agent: 'magui.b2c4@cheto', workspace: 'appsi', title: 'x' } } }],
             { env: human, fetchImpl: recording(sent) },
         );
 
@@ -1024,9 +1042,27 @@ describe('one person\'s token, a team of agents', () => {
         const result = JSON.parse(answers[0].result.content[0].text);
 
         assert.equal(result.act_as[0].agent, 'magui.x1y2@cheto');
-        assert.deepEqual(result.act_as[0].handles[0], { agent: '@magui', workspace: 'w-uuid', workspace_name: 'Appsi', workspace_slug: 'appsi' });
+        assert.deepEqual(result.act_as[0].workspaces[0], { handle: '@magui', workspace: 'w-uuid', workspace_name: 'Appsi', workspace_slug: 'appsi' });
         assert.match(result.how_to_act_as, /Pass `agent`/);
         assert.equal(result.data[0].id, 3, 'the raw list stays, for administering');
+    });
+
+    it('refuses a bare handle before sending anything', async () => {
+        for (const agent of ['magui', '@magui']) {
+            const sent = [];
+            const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_agent_inbox', arguments: { agent } } }], {
+                env: human,
+                fetchImpl: async (url) => {
+                    sent.push(url);
+
+                    return { ok: true, status: 200, text: async () => '{}' };
+                },
+            });
+
+            assert.equal(answers[0].result.isError, true);
+            assert.match(answers[0].result.content[0].text, /full Cheto address/);
+            assert.equal(sent.length, 0);
+        }
     });
 
     it('offers an agent token no agent argument and sends no agent header', async () => {
@@ -1044,7 +1080,7 @@ describe('one person\'s token, a team of agents', () => {
     });
 
     it('says a dead person\'s credential needs `cheto login`, and a dead agent\'s a new pairing', async () => {
-        const asPerson = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_agent_inbox', arguments: { agent: '@magui' } } }], {
+        const asPerson = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_agent_inbox', arguments: { agent: 'magui.b2c4@cheto' } } }], {
             env: human,
             fetchImpl: ok({ message: 'Unauthenticated.' }, 401),
         });
@@ -1068,7 +1104,7 @@ describe('one person\'s token, a team of agents', () => {
 
     for (const [status, code, pattern] of refusals) {
         it(`explains ${code} with the server's own words, and not as a dead credential`, async () => {
-            const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_agent_inbox', arguments: { agent: '@magui' } } }], {
+            const answers = await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_agent_inbox', arguments: { agent: 'magui.b2c4@cheto' } } }], {
                 env: human,
                 fetchImpl: ok({ message: `Server says ${code}.`, error: code }, status),
             });
@@ -1233,19 +1269,19 @@ describe('the whole system, as a person and as every agent', () => {
             assert.equal(asAgent.sent.at(-1).headers['X-Cheto-Agent'], undefined);
 
             const renamed = name.replace(/^cheto_/, 'cheto_agent_');
-            const asPerson = await run(renamed, { agent: '@magui', ...args });
+            const asPerson = await run(renamed, { agent: 'magui.b2c4@cheto', ...args });
 
             assert.equal(asPerson.answer.isError, undefined, asPerson.answer.content?.[0]?.text);
             assert.equal(asPerson.sent.at(-1).method, method);
             assert.equal(asPerson.sent.at(-1).url, `http://cheto.test/api/v1${path}`);
             assert.deepEqual(asPerson.sent.at(-1).body, body);
-            assert.equal(asPerson.sent.at(-1).headers['X-Cheto-Agent'], '@magui');
+            assert.equal(asPerson.sent.at(-1).headers['X-Cheto-Agent'], 'magui.b2c4@cheto');
             assert.equal(asPerson.sent.at(-1).headers.Authorization, 'Bearer cheto_ut_secret');
         });
     }
 
     it('refuses the person\'s board tool when handed an agent, naming the agent\'s', async () => {
-        const { answer, sent } = await run('cheto_column_add', { agent: '@magui', area: '16', name: 'x', category: 'inbox' });
+        const { answer, sent } = await run('cheto_column_add', { agent: 'magui.b2c4@cheto', area: '16', name: 'x', category: 'inbox' });
 
         assert.equal(answer.isError, true);
         assert.match(answer.content[0].text, /cheto_agent_column_add/);
@@ -1277,7 +1313,7 @@ describe('the whole system, as a person and as every agent', () => {
 
     it('spells out an agent\'s capabilities in whoami, and that closing is never one', async () => {
         const asAgent = JSON.parse((await run('cheto_whoami', {}, {})).answer.content[0].text);
-        const asPerson = JSON.parse((await run('cheto_agent_whoami', { agent: '@magui' })).answer.content[0].text);
+        const asPerson = JSON.parse((await run('cheto_agent_whoami', { agent: 'magui.b2c4@cheto' })).answer.content[0].text);
 
         for (const result of [asAgent, asPerson]) {
             assert.deepEqual(result.what_you_may_do.capabilities, ['tasks.create', 'channels.post']);

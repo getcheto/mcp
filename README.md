@@ -93,8 +93,12 @@ cheto_agent_task_update, cheto_task_claim, ...) and pass agent: "magui.x1y2@chet
 
 `cheto_agents` lists every agent you own with that address and, for each
 workspace it works in, its handle and the workspace — the `act_as` field is the
-short answer. When an agent works in several workspaces and is named by handle,
-also pass `workspace` (uuid or slug); `CHETO_WORKSPACE` sets a default.
+(`act_as[].agent` is the address to pass; `act_as[].workspaces[]` lists
+`{handle, workspace, …}` — it was `handles[].agent` before 0.3.3)
+short answer. `agent` is always that full address: a bare handle is refused
+before anything is sent, because two agents can share one. When an agent works
+in several workspaces, also pass `workspace` (uuid or slug); `CHETO_WORKSPACE`
+sets a default.
 
 What makes this safe:
 

@@ -884,12 +884,16 @@ async function assigneeFields(cheto, who, { explicit = false } = {}) {
         return { assignee_type: null, assignee_id: null };
     }
 
-    const wanted = String(who).trim().replace(/^@/, '').toLowerCase();
+    const wanted = fold(String(who).trim().replace(/^@/, ''));
     const { participants = [] } = await cheto.call('/me');
 
+    const typed = String(who).trim().replace(/^@/, '').toLowerCase();
+    // Exactly as typed first; without the accent only when it can mean one person.
+    const only = (found) => (found.length === 1 ? found[0] : undefined);
     const match =
-        participants.find((person) => String(person.slug ?? '').toLowerCase() === wanted) ??
-        participants.find((person) => String(person.name ?? '').toLowerCase() === wanted);
+        participants.find((person) => String(person.slug ?? '').toLowerCase() === typed) ??
+        only(participants.filter((person) => fold(person.slug) === wanted)) ??
+        only(participants.filter((person) => fold(person.name) === wanted));
 
     if (!match) {
         throw new Error(
@@ -898,4 +902,15 @@ async function assigneeFields(cheto, who, { explicit = false } = {}) {
     }
 
     return { assignee_type: match.type, assignee_id: match.id };
+}
+
+/**
+ * A handle as it is compared: lower case, accents off — "@lucia" is Lucía,
+ * the way the server resolves a mention.
+ */
+function fold(text) {
+    return String(text ?? '')
+        .normalize('NFD')
+        .replace(/\p{M}/gu, '')
+        .toLowerCase();
 }

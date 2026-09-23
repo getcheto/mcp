@@ -217,7 +217,11 @@ function explain(status, payload, { surface = 'agent', kind = 'agent', agent = n
     }
 
     if (code === 'agent_required') {
-        return `${said || 'This call needs an agent to act as.'} Pass \`agent\`: the agent's Cheto address (rocky.a7f3@cheto) or its @handle. cheto_agents lists the ones you can act as.`;
+        return `${said || 'This call needs an agent to act as.'} Pass \`agent\`: the agent's full Cheto address (rocky.a7f3@cheto). cheto_agents lists the ones you can act as.`;
+    }
+
+    if (code === 'agent_address_required') {
+        return `${said || 'Name the agent by its full address.'} A bare handle can belong to more than one agent. cheto_agents lists each address.`;
     }
 
     if (code === 'agent_mismatch') {
@@ -225,7 +229,7 @@ function explain(status, payload, { surface = 'agent', kind = 'agent', agent = n
     }
 
     if (code === 'no_such_agent') {
-        return `${said || 'No such agent.'} Only an agent you own, with an active place in a workspace, can be acted as — named by its Cheto address (rocky.a7f3@cheto) or its handle there. cheto_agents lists them.`;
+        return `${said || 'No such agent.'} Only an agent you own, with an active place in a workspace, can be acted as — named by its full Cheto address (rocky.a7f3@cheto). cheto_agents lists them.`;
     }
 
     if (code === 'ambiguous_agent') {

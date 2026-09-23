@@ -8,7 +8,8 @@
  * A person's credential (`cheto_ut_…`) gets two sets. Its own — the boards, the
  * columns, the agents, work filed under the person's name — on `/api/v1/cli`.
  * And the work tools, each of which **requires** `agent`: the person's own agent
- * to act as, by its Cheto address or its handle. That is how one MCP server with
+ * to act as, by its full Cheto address (a bare handle is refused: two agents can
+ * share one). That is how one MCP server with
  * one token serves a team of agents, each working under its own name: every
  * agent's system prompt says which one it is, and it passes that on every call.
  *
@@ -33,7 +34,7 @@ import { TOOLS } from './tools.js';
 
 const AGENT_ARGUMENT = {
     type: 'string',
-    description: 'The agent you act as: its Cheto address like rocky.a7f3@cheto or its @handle. cheto_agents lists them.',
+    description: 'The agent you act as: its full Cheto address, like rocky.a7f3@cheto. A bare handle is refused. cheto_agents lists them.',
 };
 
 const WORKSPACE_ARGUMENT = {
@@ -104,7 +105,16 @@ function asAgent(tool, renamed) {
         run: (cheto, { agent, workspace, ...rest } = {}) => {
             if (isBlank(agent)) {
                 throw new Error(
-                    `${name} acts as one of your agents, and nothing said which. Pass \`agent\`: its Cheto address (rocky.a7f3@cheto) or its @handle — the one your instructions give you. cheto_agents lists them. Nothing was sent.`,
+                    `${name} acts as one of your agents, and nothing said which. Pass \`agent\`: its full Cheto address (rocky.a7f3@cheto) — the one your instructions give you. cheto_agents lists them. Nothing was sent.`,
+                );
+            }
+
+            // The address, never a bare handle: a handle can repeat, so
+            // "magui" could be somebody's other @magui. Refused here, before
+            // anything is sent, with the fix in the same sentence.
+            if (!/^[^@\s]+@[^@\s]+$/.test(String(agent).trim())) {
+                throw new Error(
+                    `"${agent}" is a handle. Name the agent by its full Cheto address, like rocky.a7f3@cheto — the one your instructions give you. cheto_agents lists them. Nothing was sent.`,
                 );
             }
 

@@ -232,7 +232,7 @@ export const HUMAN_TOOLS = [
     {
         name: 'cheto_agents',
         description:
-            'The agents you own: each one\'s Cheto address, what it is called in each workspace, its charter, its board, and which machines are armed for it. `act_as` is the short answer to "which id do I pass": the value for `agent` on the agent tools — the address, or the @handle in a workspace — and the workspace each handle belongs to. Somebody else\'s agent is not yours to administer or act as, and is not here.',
+            'The agents you own: each one\'s Cheto address, what it is called in each workspace, its charter, its board, and which machines are armed for it. `act_as` is the short answer to "which id do I pass": the value for `agent` on the agent tools — always the full address — and the workspaces it works in. Somebody else\'s agent is not yours to administer or act as, and is not here.',
         inputSchema: { type: 'object', properties: {} },
         run: async (cheto) => withActAs(await cheto.call('/agents')),
     },
@@ -752,21 +752,22 @@ async function actorFields(cheto, workspace, { who, type, id } = {}, { explicit 
  *
  * An agent run on a person's token has to say who it is on every call, and the
  * raw list buries the answer in memberships and connections. `act_as` puts it
- * first: the address, which is unique across Cheto and never ambiguous, and
- * each handle with the workspace it belongs to — a handle alone is ambiguous
- * the moment the agent works in two. The raw list stays, for administering.
+ * first: the address, which is unique across Cheto and the only name an
+ * agent tool accepts — a handle can repeat, so it is refused. The workspaces
+ * are listed so an agent in several knows what to pass as `workspace`. The raw
+ * list stays, for administering.
  */
 function withActAs(answer) {
     const agents = Array.isArray(answer?.data) ? answer.data : [];
 
     return {
         how_to_act_as:
-            'Pass `agent` to an agent tool with the address below (preferred: unique everywhere) or with an @handle. When the agent works in more than one workspace and you name it by handle, pass `workspace` too.',
+            'Pass `agent` to an agent tool with the full address below — a bare handle is refused, because two agents can share one. When the agent works in more than one workspace, pass `workspace` too.',
         act_as: agents.map((agent) => ({
             name: agent.name,
             agent: agent.address ?? null,
-            handles: (agent.memberships ?? []).map((membership) => ({
-                agent: membership.mention ?? (membership.handle ? `@${membership.handle}` : null),
+            workspaces: (agent.memberships ?? []).map((membership) => ({
+                handle: membership.mention ?? (membership.handle ? `@${membership.handle}` : null),
                 workspace: membership.workspace?.uuid ?? membership.workspace?.slug ?? null,
                 workspace_name: membership.workspace?.name ?? null,
                 workspace_slug: membership.workspace?.slug ?? null,
