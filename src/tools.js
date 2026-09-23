@@ -37,13 +37,17 @@ export const TOOLS = [
     {
         name: 'cheto_tasks',
         description:
-            'List tasks. Without arguments: the open ones. `assigned` "me" narrows to work you hold, review included — which cheto_inbox deliberately omits. `tag` narrows to the tasks carrying ALL of the tags named, not any of them. Returns at most 100, newest first.',
+            'List tasks. Without arguments: the open ones. `assigned` "me" narrows to work you hold, review included — which cheto_inbox deliberately omits. Supports cursor pagination, limit, status, created_after and optional count. `tag` narrows to the tasks carrying ALL of the tags named, not any of them. Returns newest first.',
         inputSchema: {
             type: 'object',
             properties: {
                 assigned: { type: 'string', enum: ['me'] },
                 area: { type: 'string', description: 'One board only, by name, slug or id. cheto_whoami lists them.' },
+                cursor: { type: 'string', description: 'Cursor returned as next_cursor by a previous page.' },
+                limit: { type: 'number', minimum: 1, maximum: 100, description: 'Maximum rows to return (default 100).' },
                 status: { type: 'string', enum: ['inbox', 'ready', 'in_progress', 'review', 'done'] },
+                created_after: { type: 'string', description: 'Only tasks created after this ISO date/time.' },
+                count: { type: 'boolean', description: 'Include the total matching count.' },
                 open: { type: 'boolean', description: 'Default true. Pass false to include finished work.' },
                 tag: {
                     type: 'array',
@@ -251,6 +255,12 @@ export const TOOLS = [
         description: 'Say something on a task. Where you report what you did — commenting does not move the task, so it will not wake you again.',
         inputSchema: { type: 'object', properties: { id: { type: 'number' }, body: { type: 'string' } }, required: ['id', 'body'] },
         run: (cheto, { id, body }) => cheto.call(`/tasks/${id}/comments`, { method: 'POST', body: { body }, idempotencyKey: `mcp-comment-${id}-${slug(body)}` }),
+    },
+    {
+        name: 'cheto_capacity',
+        description: 'Workspace workload snapshot by board. Reports derived open, in-progress, review, and unassigned work; it does not invent a throughput limit or availability budget.',
+        inputSchema: { type: 'object', properties: {} },
+        run: (cheto) => cheto.call('/capacity'),
     },
     {
         name: 'cheto_reviews',

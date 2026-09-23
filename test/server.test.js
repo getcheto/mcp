@@ -94,6 +94,25 @@ describe('the MCP surface', () => {
     });
 });
 
+describe('capacity tool', () => {
+    it('exposes cheto_capacity and calls the agent capacity endpoint', async () => {
+        const sent = [];
+        const answers = await exchange([
+            { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+            { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'cheto_capacity', arguments: {} } },
+        ], {
+            fetchImpl: async (url) => {
+                sent.push(url);
+                return { ok: true, status: 200, text: async () => JSON.stringify({ semantics: 'derived_workload', data: [], summary: {} }) };
+            },
+        });
+
+        assert.ok(answers[0].result.tools.some((tool) => tool.name === 'cheto_capacity'));
+        assert.equal(answers[1].result.isError, undefined);
+        assert.equal(sent[0], 'http://cheto.test/api/v1/agent/capacity');
+    });
+});
+
 describe('the tool set', () => {
     it('offers nothing the server would refuse', () => {
         // Closing a task and creating a participant are refused for every agent,
