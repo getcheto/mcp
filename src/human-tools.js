@@ -482,7 +482,7 @@ export const HUMAN_TOOLS = [
             properties: { id: { type: ['number', 'string'] }, comment_id: { type: 'number' }, body: { type: 'string' } },
             required: ['id', 'comment_id', 'body'],
         },
-        run: (cheto, { id, comment_id, body }) => cheto.call(`/tasks/${taskRef(id)}/comments/${comment_id}`, { method: 'PATCH', body: { body } }),
+        run: (cheto, { id, comment_id, body }) => cheto.call(`/tasks/${taskRef(id)}/comments/${encodeURIComponent(String(comment_id))}`, { method: 'PATCH', body: { body } }),
     },
     {
         name: 'cheto_inbox',

@@ -296,7 +296,7 @@ export const TOOLS = [
             properties: { id: { type: 'number', description: 'The task.' }, comment_id: { type: 'number', description: 'The comment, as cheto_task lists it.' }, body: { type: 'string' } },
             required: ['id', 'comment_id', 'body'],
         },
-        run: (cheto, { id, comment_id, body }) => cheto.call(`/tasks/${id}/comments/${comment_id}`, { method: 'PATCH', body: { body } }),
+        run: (cheto, { id, comment_id, body }) => cheto.call(`/tasks/${id}/comments/${encodeURIComponent(String(comment_id))}`, { method: 'PATCH', body: { body } }),
     },
     {
         name: 'cheto_capacity',
