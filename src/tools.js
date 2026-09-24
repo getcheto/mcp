@@ -869,7 +869,7 @@ function confirmApplied(answer, body) {
     }
 
     throw new Error(
-        `The rest of the change went through, but requires_human is still ${task.requires_human}: this Cheto writes it only alongside a descriptive field. Send it again together with title, description, type, priority, due_on or tags.`,
+        `The rest of the change went through, but requires_human is still ${task.requires_human}: this Cheto writes it only alongside a descriptive field. Send it again together with title, description, type, priority, due_on, story_points or tags.`,
     );
 }
 
