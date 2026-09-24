@@ -140,6 +140,24 @@ describe('the tool set', () => {
     });
 });
 
+describe('fixing a comment', () => {
+    it('patches the comment on its task', async () => {
+        const sent = [];
+
+        await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_comment_edit', arguments: { id: 7, comment_id: 40, body: 'corregido' } } }], {
+            fetchImpl: async (url, options) => {
+                sent.push({ url, method: options.method, body: options.body ? JSON.parse(options.body) : null });
+
+                return { ok: true, status: 200, text: async () => JSON.stringify({ data: { id: 40, body: 'corregido' } }) };
+            },
+        });
+
+        assert.equal(sent.at(-1).method, 'PATCH');
+        assert.match(sent.at(-1).url, /\/tasks\/7\/comments\/40$/);
+        assert.deepEqual(sent.at(-1).body, { body: 'corregido' });
+    });
+});
+
 describe('sizing work', () => {
     it('passes story points through, and null to clear them', async () => {
         const sent = [];

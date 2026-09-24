@@ -289,6 +289,16 @@ export const TOOLS = [
         run: (cheto, { id, body }) => cheto.call(`/tasks/${id}/comments`, { method: 'POST', body: { body }, idempotencyKey: `mcp-comment-${id}-${slug(body)}` }),
     },
     {
+        name: 'cheto_task_comment_edit',
+        description: 'Correct a comment you wrote on a task. Only your own: anybody else\'s is refused. The thread shows it was edited, and only people newly @mentioned are told.',
+        inputSchema: {
+            type: 'object',
+            properties: { id: { type: 'number', description: 'The task.' }, comment_id: { type: 'number', description: 'The comment, as cheto_task lists it.' }, body: { type: 'string' } },
+            required: ['id', 'comment_id', 'body'],
+        },
+        run: (cheto, { id, comment_id, body }) => cheto.call(`/tasks/${id}/comments/${comment_id}`, { method: 'PATCH', body: { body } }),
+    },
+    {
         name: 'cheto_capacity',
         description: 'Workspace workload snapshot by board. Reports derived open, in-progress, review, and unassigned work; it does not invent a throughput limit or availability budget.',
         inputSchema: { type: 'object', properties: {} },

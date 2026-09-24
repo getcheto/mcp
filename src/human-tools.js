@@ -475,6 +475,16 @@ export const HUMAN_TOOLS = [
             cheto.call(`/tasks/${taskRef(id)}/comments`, { method: 'POST', body: { body }, idempotencyKey: `mcp-comment-${taskRef(id)}-${slug(String(body ?? ''))}` }),
     },
     {
+        name: 'cheto_task_comment_edit',
+        description: 'Correct a comment you wrote on a task, as you. Only your own.',
+        inputSchema: {
+            type: 'object',
+            properties: { id: { type: ['number', 'string'] }, comment_id: { type: 'number' }, body: { type: 'string' } },
+            required: ['id', 'comment_id', 'body'],
+        },
+        run: (cheto, { id, comment_id, body }) => cheto.call(`/tasks/${taskRef(id)}/comments/${comment_id}`, { method: 'PATCH', body: { body } }),
+    },
+    {
         name: 'cheto_inbox',
         description:
             'What is waiting on you, the person: open tasks you hold, reviews you owe, and how many notifications are unread. In one workspace, or every one this credential reaches when none is named. Reading marks nothing read.',
