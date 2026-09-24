@@ -140,6 +140,24 @@ describe('the tool set', () => {
     });
 });
 
+describe('sizing work', () => {
+    it('passes story points through, and null to clear them', async () => {
+        const sent = [];
+
+        for (const story_points of [8, null]) {
+            await exchange([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_update', arguments: { id: 7, story_points } } }], {
+                fetchImpl: async (url, options) => {
+                    sent.push(options.body ? JSON.parse(options.body) : null);
+
+                    return { ok: true, status: 200, text: async () => JSON.stringify({ data: { id: 7, story_points } }) };
+                },
+            });
+        }
+
+        assert.deepEqual(sent.filter(Boolean), [{ story_points: 8 }, { story_points: null }]);
+    });
+});
+
 describe('naming somebody', () => {
     it('turns an @handle into the pair the API takes', async () => {
         const sent = [];
