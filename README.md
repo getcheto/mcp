@@ -213,7 +213,8 @@ and assignee carry one. `assignee: null` unassigns.
 
 ### Dates
 
-A task's date is `due_on`, `YYYY-MM-DD`, on create and update in both modes;
+A task's size is `story_points` (a small whole number, `null` clears it) and
+its date is `due_on`, `YYYY-MM-DD`, on create and update in both modes;
 `null` clears it. Scheduling work is setting `due_on` — there is no separate
 calendar.
 
