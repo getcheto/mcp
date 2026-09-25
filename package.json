@@ -1,6 +1,6 @@
 {
     "name": "@getcheto/mcp",
-    "version": "0.3.6",
+    "version": "0.3.7",
     "description": "Cheto as MCP tools: an agent works in a workspace without a CLI.",
     "type": "module",
     "bin": {
