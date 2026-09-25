@@ -839,14 +839,64 @@ describe('the credential decides the surface', () => {
         assert.deepEqual(sent.at(-1).body, { work_area_status_id: 64 });
     });
 
-    it('refuses a column name that two boards share rather than choosing one', async () => {
-        const twoBoards = {
-            data: [
-                board.data[0],
-                { id: 17, uuid: '0199a0de-0000-7000-8000-000000000002', name: 'Soporte', slug: 'soporte', statuses: [{ id: 91, name: 'Esperando al cliente', key: 'waiting' }] },
-            ],
-        };
+    const twoBoards = {
+        data: [
+            board.data[0],
+            { id: 17, uuid: '0199a0de-0000-7000-8000-000000000002', name: 'Soporte', slug: 'soporte', statuses: [{ id: 91, name: 'Esperando al cliente', key: 'waiting' }] },
+        ],
+    };
 
+    // The task as GET /tasks/{id} returns it: `work_area_id` is its board.
+    const taskOn = (workArea) => ({ data: { id: 430, work_area_id: workArea } });
+
+    it('reads a shared column name on the board the task already sits on', async () => {
+        const sent = [];
+
+        await exchange(
+            [
+                {
+                    jsonrpc: '2.0',
+                    id: 1,
+                    method: 'tools/call',
+                    params: { name: 'cheto_task_update', arguments: { workspace: 'appsi', id: 430, column: 'Esperando al cliente' } },
+                },
+            ],
+            {
+                env: human,
+                fetchImpl: async (url, options) => {
+                    sent.push({ url, method: options.method, body: options.body ? JSON.parse(options.body) : null });
+
+                    return { ok: true, status: 200, text: async () => JSON.stringify(url.includes('/areas') ? twoBoards : taskOn(17)) };
+                },
+            },
+        );
+
+        assert.equal(sent[0].url, 'http://cheto.test/api/v1/cli/tasks/430');
+        assert.equal(sent.at(-1).method, 'PATCH');
+        assert.deepEqual(sent.at(-1).body, { work_area_status_id: 91 });
+    });
+
+    it('still finds a column on another board when the task board has none by that name', async () => {
+        const sent = [];
+        const elsewhere = { data: [...twoBoards.data, { id: 18, name: 'Ventas', slug: 'ventas', statuses: [{ id: 95, name: 'Ganado', key: 'won' }] }] };
+
+        await exchange(
+            [{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cheto_task_update', arguments: { workspace: 'appsi', id: 430, column: 'Ganado' } } }],
+            {
+                env: human,
+                fetchImpl: async (url, options) => {
+                    sent.push({ url, body: options.body ? JSON.parse(options.body) : null });
+
+                    return { ok: true, status: 200, text: async () => JSON.stringify(url.includes('/areas') ? elsewhere : taskOn(17)) };
+                },
+            },
+        );
+
+        assert.deepEqual(sent.at(-1).body, { work_area_status_id: 95 });
+    });
+
+    it('refuses a column name that two boards share rather than choosing one', async () => {
+        // A task on no board: there is no board of its own to read the name in.
         const answers = await exchange(
             [
                 {
@@ -856,7 +906,10 @@ describe('the credential decides the surface', () => {
                     params: { name: 'cheto_task_update', arguments: { workspace: 'appsi', id: 430, column: 'Esperando al cliente' } },
                 },
             ],
-            { env: human, fetchImpl: ok(twoBoards) },
+            {
+                env: human,
+                fetchImpl: async (url) => ({ ok: true, status: 200, text: async () => JSON.stringify(url.includes('/areas') ? twoBoards : taskOn(null)) }),
+            },
         );
 
         assert.equal(answers[0].result.isError, true);

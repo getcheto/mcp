@@ -404,7 +404,7 @@ export const HUMAN_TOOLS = [
                 column: {
                     type: ['string', 'number'],
                     description:
-                        'Move it to this column, by name, key or id. Preferred over `status`: a column names where the card actually goes, while a status leaves the choice to the server. `area` is only needed when two boards of this workspace have a column by the same name.',
+                        'Move it to this column, by name, key or id. Preferred over `status`: a column names where the card actually goes, while a status leaves the choice to the server. The name is read on the board the task already sits on first, so `area` is only needed to move it to a column of another board whose name more than one board shares.',
                 },
                 area: { type: 'string', description: 'Which board `column` belongs to, when the name alone is ambiguous.' },
                 tags: { type: 'array', items: { type: 'string' }, description: 'The complete set, replacing whatever is there.' },
@@ -419,7 +419,7 @@ export const HUMAN_TOOLS = [
             const named = workspaceFor(cheto, workspace);
             const task = taskRef(id);
             const assignment = await actorFields(cheto, named, { who: assignee, type, id: who }, { explicit: true });
-            const placement = await columnFor(cheto, named, area, column);
+            const placement = await columnFor(cheto, named, area, column, await homeBoardOf(cheto, task, area, column));
             const body = { ...rest, ...assignment, ...placement };
 
             if (Object.keys(body).length === 0) {
@@ -878,16 +878,35 @@ function taskRef(id) {
 }
 
 /**
+ * The board a task already sits on, when a move needs one to read its column in.
+ *
+ * Only asked for when there is a column to resolve and no `area` to resolve it
+ * in, so every other update stays one call. `null` means the task is on no
+ * board, which leaves the column to be found across all of them.
+ */
+async function homeBoardOf(cheto, task, area, column) {
+    if (isBlank(column) || !isBlank(area)) {
+        return null;
+    }
+
+    const { data } = await cheto.call(`/tasks/${task}`);
+
+    return data?.work_area_id ?? null;
+}
+
+/**
  * The column a move names, as the field the API takes.
  *
  * Unlike creating, a move usually does not need to say which board: the card is
- * already on one, and "Aprobadas pendientes" means a single column in almost
- * every workspace. So the board is optional here and the name is resolved
- * across all of them — but an ambiguous name **fails**, naming the boards that
- * matched, rather than picking the first. Guessing is how three hundred rows
- * once landed somewhere nobody asked for, and a move is no safer than a create.
+ * already on one, so a name is read in that board first — "Hecho" is on every
+ * board of a workspace, and the one the card sits on is the one meant. Only
+ * when the task's board has no such column (or it is on none) is the name
+ * resolved across all of them, and there an ambiguous name **fails**, naming
+ * the boards that matched, rather than picking the first. Guessing is how three
+ * hundred rows once landed somewhere nobody asked for, and a move is no safer
+ * than a create.
  */
-async function columnFor(cheto, workspace, area, column) {
+async function columnFor(cheto, workspace, area, column, homeBoard = null) {
     if (isBlank(column)) {
         return {};
     }
@@ -903,6 +922,13 @@ async function columnFor(cheto, workspace, area, column) {
               ),
           );
 
+    const home = isBlank(area) && homeBoard !== null ? areas.find((board) => String(board.id) === String(homeBoard)) : undefined;
+    const own = (home?.statuses ?? []).find((one) => matchesColumn(one, wanted));
+
+    if (own) {
+        return { work_area_status_id: own.id };
+    }
+
     if (boards.length === 0) {
         throw new Error(
             `"${workspace}" has no board called "${area}". It has: ${areas.map((one) => `${one.name} (${one.slug})`).join(', ') || 'none'}.`,
@@ -910,14 +936,7 @@ async function columnFor(cheto, workspace, area, column) {
     }
 
     const matches = boards.flatMap((board) =>
-        (board.statuses ?? [])
-            .filter(
-                (one) =>
-                    String(one.id) === wanted ||
-                    String(one.name ?? '').toLowerCase() === wanted ||
-                    String(one.key ?? '').toLowerCase() === wanted,
-            )
-            .map((one) => ({ board, column: one })),
+        (board.statuses ?? []).filter((one) => matchesColumn(one, wanted)).map((one) => ({ board, column: one })),
     );
 
     if (matches.length === 0) {
@@ -933,6 +952,10 @@ async function columnFor(cheto, workspace, area, column) {
     }
 
     return { work_area_status_id: matches[0].column.id };
+}
+
+function matchesColumn(column, wanted) {
+    return [column.id, column.name, column.key].some((field) => String(field ?? '').toLowerCase() === wanted);
 }
 
 function isBlank(value) {
